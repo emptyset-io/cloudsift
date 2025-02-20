@@ -6,6 +6,7 @@ import (
 
 	"cloudsift/cmd/list"
 	"cloudsift/cmd/scan"
+	"cloudsift/cmd/version"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 
@@ -70,6 +71,7 @@ It provides a simple interface for common AWS tasks and operations.`,
 	// Add commands
 	rootCmd.AddCommand(list.NewListCmd())
 	rootCmd.AddCommand(scan.NewScanCmd())
+	rootCmd.AddCommand(version.NewVersionCmd())
 
 	return rootCmd.Execute()
 }

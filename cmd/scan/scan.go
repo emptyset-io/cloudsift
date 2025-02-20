@@ -32,65 +32,28 @@ func NewScanCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan AWS resources",
-		Long: `Scan AWS resources using the available scanners.
-If --scanner-role is provided, scan will operate across all accounts in the organization.
-Otherwise, it will only scan the current account.
+		Long: `Scan AWS resources for potential cost savings.
+Examples:
+  # Scan EBS volumes in us-west-2
+  cloudsift scan --scanners ebs-volumes --regions us-west-2
 
-Resources will be marked as unused if they have been in an off/unattached state
-for longer than the specified --days-unused threshold (default 30 days).
-
-If no scanners are specified via --scanners, all available scanners will be used.`,
-		Example: `  # Scan all resources in current account using all scanners
-  cloudsift scan
-
-  # Scan across all accounts in organization
-  cloudsift scan --scanner-role MyRole
-
-  # Scan specific resources in specific regions
-  cloudsift scan --regions us-east-1,us-west-2 --scanners ebs-volumes,ebs-snapshots
-
-  # Output results to a specific directory (default is ./output)
-  cloudsift scan --output filesystem --output-dir /path/to/dir
-
-  # Output results to S3
-  cloudsift scan --output s3 --bucket my-bucket
-
-  # Set custom threshold for unused resources (default 30 days)
-  cloudsift scan --days-unused 60`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// Validate output flags
-			if opts.output != "" {
-				switch output.Type(opts.output) {
-				case output.FileSystem:
-					// No additional validation needed
-				case output.S3:
-					if opts.bucket == "" {
-						return fmt.Errorf("--bucket is required when --output=s3")
-					}
-				default:
-					return fmt.Errorf("invalid output type: %s, must be 'filesystem' or 's3'", opts.output)
-				}
-			}
-			// Validate days threshold
-			if opts.daysUnused < 0 {
-				return fmt.Errorf("--days-unused must be a positive number")
-			}
-
-			return nil
-		},
+  # Scan multiple resource types in multiple regions
+  cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScan(cmd, opts)
 		},
 	}
 
-	// Add flags
 	cmd.Flags().StringVar(&opts.regions, "regions", "", "Comma-separated list of regions to scan")
-	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to use")
-	cmd.Flags().StringVar(&opts.format, "format", "text", "Output format (text or json)")
-	cmd.Flags().StringVar(&opts.output, "output", "filesystem", "Output destination (filesystem or s3)")
-	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory to write output files to (only used with --output=filesystem)")
+	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to run")
+	cmd.Flags().StringVar(&opts.format, "format", "text", "Output format (text, json)")
+	cmd.Flags().StringVar(&opts.output, "output", "stdout", "Output destination (stdout, file, s3)")
 	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name for output (required when --output=s3)")
+	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory for file output (required when --output=file)")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
+
+	cmd.MarkFlagRequired("scanners")
+	cmd.MarkFlagRequired("regions")
 
 	return cmd
 }
@@ -98,31 +61,21 @@ If no scanners are specified via --scanners, all available scanners will be used
 type scanResult struct {
 	AccountID   string                     `json:"account_id"`
 	AccountName string                     `json:"account_name"`
-	Results     map[string]aws.ScanResults `json:"results"` // Map of scanner label to results
+	Results     map[string]aws.ScanResults `json:"results"` // Map of scanner name to results
 }
 
 func getScanners(scannerList string) ([]aws.Scanner, error) {
-	registry := aws.DefaultRegistry
-	var scanners []aws.Scanner
-
-	// If no scanners specified, use all available
 	if scannerList == "" {
-		for _, name := range registry.ListScanners() {
-			scanner, err := registry.GetScanner(name)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
-			}
-			scanners = append(scanners, scanner)
-		}
-		return scanners, nil
+		return nil, fmt.Errorf("no scanners specified")
 	}
 
-	// Get specified scanners
-	requestedScanners := strings.Split(scannerList, ",")
-	for _, name := range requestedScanners {
-		scanner, err := registry.GetScanner(name)
+	var scanners []aws.Scanner
+	names := strings.Split(scannerList, ",")
+
+	for _, name := range names {
+		scanner, err := aws.DefaultRegistry.GetScanner(name)
 		if err != nil {
-			return nil, fmt.Errorf("invalid scanner '%s': %w", name, err)
+			return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
 		}
 		scanners = append(scanners, scanner)
 	}
@@ -219,10 +172,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 					// Safely append results
 					resultsMutex.Lock()
-					if accountResults[account.ID].Results[scanner.Label()] == nil {
-						accountResults[account.ID].Results[scanner.Label()] = results
+					if accountResults[account.ID].Results[scanner.Name()] == nil {
+						accountResults[account.ID].Results[scanner.Name()] = results
 					} else {
-						accountResults[account.ID].Results[scanner.Label()] = append(accountResults[account.ID].Results[scanner.Label()], results...)
+						accountResults[account.ID].Results[scanner.Name()] = append(accountResults[account.ID].Results[scanner.Name()], results...)
 					}
 					resultsMutex.Unlock()
 
