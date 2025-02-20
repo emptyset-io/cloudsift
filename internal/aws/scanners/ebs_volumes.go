@@ -22,7 +22,7 @@ func init() {
 
 // Name implements Scanner interface
 func (s *EBSVolumeScanner) Name() string {
-	return "EBS Volumes"
+	return "ebs-volumes"
 }
 
 // ArgumentName implements Scanner interface
@@ -32,7 +32,7 @@ func (s *EBSVolumeScanner) ArgumentName() string {
 
 // Label implements Scanner interface
 func (s *EBSVolumeScanner) Label() string {
-	return "EBSVolumes"
+	return "ebs-volumes"
 }
 
 // Scan implements Scanner interface

@@ -1,92 +1,62 @@
-# Makefile for building CloudSift CLI tool
+GO ?= go
+GOFMT ?= gofmt
+BUILD_DIR := bin
+BINARY_NAME := cloudsift
 
-# Project Variables
-BINARY_NAME=cloudsift
-VERSION=0.1.0
-BUILD_DIR=bin
-GO_VERSION=1.24.0
-GOFILES=$(shell find . -name '*.go' | grep -v vendor)
-LDFLAGS=-X "main.version=$(VERSION)"
+# Build information
+VERSION := $(shell git describe --tags --always --dirty)
+COMMIT := $(shell git rev-parse HEAD)
+BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S')
+GO_VERSION := $(shell $(GO) version | cut -d ' ' -f 3)
 
-# Detect OS
-OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m)
+# Build flags
+LDFLAGS := -X 'cloudsift/internal/version.GitCommit=$(COMMIT)' \
+           -X 'cloudsift/internal/version.BuildTime=$(BUILD_TIME)' \
+           -X 'cloudsift/internal/version.GoVersion=$(GO_VERSION)'
 
-# Install Go using g (Go Version Manager)
-install-go:
-	@echo "Checking for 'g' package manager..."
-	@if ! command -v g &> /dev/null; then \
-		echo "'g' is not installed. Installing now..."; \
-		curl -sSL https://git.io/g-install | bash; \
-		exec $$SHELL; \
-	fi
-	@echo "Installing Go $(GO_VERSION)..."
-	@g install $(GO_VERSION)
-	@g use $(GO_VERSION)
-	@g default $(GO_VERSION)
-	@echo "Go $(GO_VERSION) installed and set as default."
+.PHONY: all
+all: clean deps fmt build
 
-
-# Install dependencies
+.PHONY: deps
 deps:
-	@echo "Downloading dependencies..."
-	@go mod tidy
-	@go mod vendor
+	$(GO) mod download
 
-# Format code
+.PHONY: fmt
 fmt:
-	@echo "Formatting code..."
-	@go fmt ./...
+	$(GOFMT) -w .
 
-# Run static analysis (linting)
+.PHONY: lint
 lint:
-	@echo "Running lint checks..."
-	@if ! command -v golangci-lint &> /dev/null; then \
-		echo "Installing golangci-lint..."; \
-		if [ "$(shell uname)" = "Darwin" ]; then \
-			brew install golangci-lint; \
-		else \
-			go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
-		fi \
-	fi
-	@golangci-lint run
+	golangci-lint run
 
-# Run tests
+.PHONY: test
 test:
-	@echo "Running tests..."
-	@go test -v ./...
+	$(GO) test -v ./...
 
-# Build binary
+.PHONY: build
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) main.go
+	@$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# Build cross-platform binaries
+.PHONY: build-all
 build-all:
 	@echo "Building for all platforms..."
 	@mkdir -p $(BUILD_DIR)
-	@GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 main.go
-	@GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 main.go
-	@GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 main.go
-	@GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe main.go
+	@GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64
+	@GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
+	@GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
+	@GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
 	@echo "Cross-platform build complete."
 
-# Clean build artifacts
+.PHONY: clean
 clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR)
 
-# Run the application
-run:
-	@go run main.go
+.PHONY: run
+run: build
+	./$(BUILD_DIR)/$(BINARY_NAME)
 
-# Release version
-release: build-all
-	@echo "Packaging release..."
-	@tar -czvf $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION)-$(OS)-$(ARCH).tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-*
-	@echo "Release package created: $(BUILD_DIR)/$(BINARY_NAME)-$(VERSION)-$(OS)-$(ARCH).tar.gz"
-
-# Default target
-.PHONY: install-go deps fmt lint test build build-all clean run release
+.PHONY: release
+release: lint test build-all
