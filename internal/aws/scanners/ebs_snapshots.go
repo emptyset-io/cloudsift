@@ -89,6 +89,21 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				resourceName = name
 			}
 
+			// Get volume information to determine volume type
+			var volumeType string
+			if aws.StringValue(snapshot.VolumeId) != "" {
+				volumeInput := &ec2.DescribeVolumesInput{
+					VolumeIds: []*string{snapshot.VolumeId},
+				}
+				volumeOutput, err := svc.DescribeVolumes(volumeInput)
+				if err == nil && len(volumeOutput.Volumes) > 0 {
+					volumeType = aws.StringValue(volumeOutput.Volumes[0].VolumeType)
+				}
+			}
+			if volumeType == "" {
+				volumeType = "gp2" // Default to gp2 if we can't determine the volume type
+			}
+
 			// Calculate costs
 			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
 			if err != nil {
@@ -104,21 +119,6 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			if costEstimator != nil {
 				snapshotSize := aws.Int64Value(snapshot.VolumeSize)
 
-				// Get volume type from parent volume if available
-				volumeType := "gp2" // Default to gp2
-				if aws.StringValue(snapshot.VolumeId) != "" {
-					// Try to get the parent volume
-					volumeInput := &ec2.DescribeVolumesInput{
-						VolumeIds: []*string{snapshot.VolumeId},
-					}
-					volumeOutput, err := svc.DescribeVolumes(volumeInput)
-					if err == nil && len(volumeOutput.Volumes) > 0 {
-						if vType := aws.StringValue(volumeOutput.Volumes[0].VolumeType); vType != "" {
-							volumeType = vType
-						}
-					}
-				}
-
 				logging.Debug("Calculating snapshot costs", map[string]interface{}{
 					"account_id":    accountID,
 					"region":        opts.Region,
@@ -126,6 +126,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					"resource_id":   aws.StringValue(snapshot.SnapshotId),
 					"snapshot_size": snapshotSize,
 					"volume_type":   volumeType,
+					"volume_id":     aws.StringValue(snapshot.VolumeId),
 				})
 
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
@@ -142,23 +143,22 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(snapshot.SnapshotId),
 						"resource_type": "EBSSnapshots",
+						"volume_type":   volumeType,
 					})
 				}
 			}
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"snapshot_id":            aws.StringValue(snapshot.SnapshotId),
-				"volume_id":              aws.StringValue(snapshot.VolumeId),
-				"state":                  aws.StringValue(snapshot.State),
-				"start_time":             snapshot.StartTime.Format("2006-01-02T15:04:05Z07:00"),
-				"age_days":               ageInDays,
-				"volume_size":            aws.Int64Value(snapshot.VolumeSize),
-				"encrypted":              aws.BoolValue(snapshot.Encrypted),
-				"description":            aws.StringValue(snapshot.Description),
-				"kms_key_id":             aws.StringValue(snapshot.KmsKeyId),
-				"data_encryption_key_id": aws.StringValue(snapshot.DataEncryptionKeyId),
-				"progress":               aws.StringValue(snapshot.Progress),
+				"snapshot_id":   aws.StringValue(snapshot.SnapshotId),
+				"volume_id":     aws.StringValue(snapshot.VolumeId),
+				"state":         aws.StringValue(snapshot.State),
+				"start_time":    snapshot.StartTime.Format("2006-01-02T15:04:05Z07:00"),
+				"age_days":      ageInDays,
+				"volume_size":   aws.Int64Value(snapshot.VolumeSize),
+				"encrypted":     aws.BoolValue(snapshot.Encrypted),
+				"description":   aws.StringValue(snapshot.Description),
+				"volume_type":   volumeType,
 			}
 
 			if costs != nil {

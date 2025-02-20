@@ -1,4 +1,5 @@
 {
+  "EBSSnapshots_us-west-2_gp3": 0.05,
   "EBSVolumes_us-west-2_gp3": 0.08,
   "EBSVolumes_us-west-2_standard": 0.05
 }

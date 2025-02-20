@@ -350,6 +350,10 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		if !ok {
 			return 0, fmt.Errorf("invalid resource size type for EBSSnapshots: %T", config.ResourceSize)
 		}
+		if config.VolumeType == "" {
+			return 0, fmt.Errorf("volume type is required for EBSSnapshots")
+		}
+
 		filters = []*pricing.Filter{
 			{
 				Type:  aws.String("TERM_MATCH"),
@@ -363,20 +367,22 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("volumeApiName"),
-				Value: aws.String(config.VolumeType),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("location"),
 				Value: aws.String(location),
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("usagetype"),
-				Value: aws.String("EBS:SnapshotUsage"),
+				Field: aws.String("storageMedia"),
+				Value: aws.String("Amazon S3"),
 			},
 		}
+
+		logging.Debug("Fetching snapshot pricing", map[string]interface{}{
+			"region":      region,
+			"volume_type": config.VolumeType,
+			"size":        config.ResourceSize,
+			"filters":     filters,
+		})
 	default:
 		return 0, fmt.Errorf("unsupported resource type: %s", resourceType)
 	}
