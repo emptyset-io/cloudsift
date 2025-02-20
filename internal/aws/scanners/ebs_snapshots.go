@@ -32,7 +32,7 @@ func (s *EBSSnapshotScanner) ArgumentName() string {
 
 // Label implements Scanner interface
 func (s *EBSSnapshotScanner) Label() string {
-	return "ebs-snapshots"
+	return "EBS Snapshots"
 }
 
 // Scan implements Scanner interface

@@ -13,8 +13,11 @@ type ScanOptions struct {
 
 // Scanner represents a resource scanner that can scan AWS resources
 type Scanner interface {
-	// Name returns a unique identifier for the scanner
-	Name() string
+	// ArgumentName returns the command-line argument name for the scanner (e.g., "ebs-volumes")
+	ArgumentName() string
+
+	// Label returns a human-readable label for the scanner (e.g., "EBS Volumes")
+	Label() string
 
 	// Scan performs the actual scanning operation
 	// If region is empty, uses the default region from the session
@@ -35,7 +38,7 @@ func NewRegistry() *Registry {
 
 // RegisterScanner adds a new scanner to the registry
 func (r *Registry) RegisterScanner(s Scanner) error {
-	name := s.Name()
+	name := s.ArgumentName()
 	if _, exists := r.scanners[name]; exists {
 		return fmt.Errorf("scanner with name '%s' already registered", name)
 	}

@@ -29,7 +29,7 @@ Each scanner is specialized for a specific type of resource.`,
 				if err != nil {
 					continue
 				}
-				fmt.Printf("  - %s\n", scanner.Name())
+				fmt.Printf("  - %s - %s\n", scanner.ArgumentName(), scanner.Label())
 			}
 			return nil
 		},

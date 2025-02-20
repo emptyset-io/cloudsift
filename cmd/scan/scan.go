@@ -142,7 +142,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Log scan start with configuration
 	var scannerNames []string
 	for _, s := range scanners {
-		scannerNames = append(scannerNames, s.Name())
+		scannerNames = append(scannerNames, s.Label())
 	}
 
 	// Convert accounts to the format expected by the logger
@@ -178,23 +178,23 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				account := account
 
 				tasks = append(tasks, func(ctx context.Context) error {
-					logging.ScannerStart(scanner.Name(), account.ID, account.Name, region)
+					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
 					})
 					if err != nil {
-						logging.ScannerError(scanner.Name(), account.ID, account.Name, region, err)
+						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
 						return err
 					}
 
 					// Safely append results
 					resultsMutex.Lock()
-					if accountResults[account.ID].Results[scanner.Name()] == nil {
-						accountResults[account.ID].Results[scanner.Name()] = results
+					if accountResults[account.ID].Results[scanner.Label()] == nil {
+						accountResults[account.ID].Results[scanner.Label()] = results
 					} else {
-						accountResults[account.ID].Results[scanner.Name()] = append(accountResults[account.ID].Results[scanner.Name()], results...)
+						accountResults[account.ID].Results[scanner.Label()] = append(accountResults[account.ID].Results[scanner.Label()], results...)
 					}
 					resultsMutex.Unlock()
 
@@ -203,7 +203,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					for i, r := range results {
 						resultInterfaces[i] = r
 					}
-					logging.ScannerComplete(scanner.Name(), account.ID, account.Name, region, resultInterfaces)
+					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, region, resultInterfaces)
 
 					return nil
 				})
@@ -282,7 +282,7 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 	// Log scan start with configuration
 	var scannerNames []string
 	for _, s := range scanners {
-		scannerNames = append(scannerNames, s.Name())
+		scannerNames = append(scannerNames, s.Label())
 	}
 
 	// Convert accounts to the format expected by the logger
@@ -319,14 +319,14 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 				account := account
 
 				tasks = append(tasks, func(ctx context.Context) error {
-					logging.ScannerStart(scanner.Name(), account.ID, account.Name, region)
+					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
 					})
 					if err != nil {
-						logging.ScannerError(scanner.Name(), account.ID, account.Name, region, err)
+						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
 						return err
 					}
 
@@ -340,7 +340,7 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 					for i, r := range results {
 						resultInterfaces[i] = r
 					}
-					logging.ScannerComplete(scanner.Name(), account.ID, account.Name, region, resultInterfaces)
+					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, region, resultInterfaces)
 
 					return nil
 				})
