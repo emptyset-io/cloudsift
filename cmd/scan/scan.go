@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -10,6 +11,7 @@ import (
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/output"
+	"cloudsift/internal/output/html"
 	"cloudsift/internal/worker"
 
 	"github.com/spf13/cobra"
@@ -18,14 +20,13 @@ import (
 type scanOptions struct {
 	regions          string
 	scanners         string
-	format           string
-	output           string
+	output           string // filesystem or s3
+	outputFormat     string // html or json
 	bucket           string
 	bucketRegion     string
-	outputDir        string
-	daysUnused       int    // Number of days a resource must be unused to be reported
 	organizationRole string // Role to assume for listing organization accounts
 	scannerRole      string // Role to assume for scanning accounts
+	daysUnused       int    // Number of days a resource must be unused to be reported
 }
 
 // NewScanCmd creates the scan command
@@ -51,9 +52,28 @@ Examples:
   # Scan multiple resource types in multiple regions of all organization accounts
   cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole
 
-  # Output results to S3
-  cloudsift scan --output s3 --bucket my-bucket --bucket-region us-west-2`,
+  # Output HTML report to S3
+  cloudsift scan --output s3 --output-format html --bucket my-bucket --bucket-region us-west-2
+
+  # Output JSON results to S3
+  cloudsift scan --output s3 --output-format json --bucket my-bucket --bucket-region us-west-2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate output format
+			switch opts.outputFormat {
+			case "json", "html":
+				// Valid formats
+			default:
+				return fmt.Errorf("invalid output format: %s", opts.outputFormat)
+			}
+
+			// Validate output type
+			switch opts.output {
+			case "filesystem", "s3":
+				// Valid output types
+			default:
+				return fmt.Errorf("invalid output type: %s", opts.output)
+			}
+
 			// Validate S3 parameters
 			if opts.output == "s3" {
 				if opts.bucket == "" {
@@ -63,20 +83,20 @@ Examples:
 					return fmt.Errorf("--bucket-region is required when --output=s3")
 				}
 			}
+
 			return runScan(cmd, opts)
 		},
 	}
 
 	cmd.Flags().StringVar(&opts.regions, "regions", "", "Comma-separated list of regions to scan (default: all available regions)")
 	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to run (default: all available scanners)")
-	cmd.Flags().StringVar(&opts.format, "format", "text", "Output format (text, json)")
-	cmd.Flags().StringVar(&opts.output, "output", "filesystem", "Output destination (filesystem, s3)")
+	cmd.Flags().StringVar(&opts.output, "output", "filesystem", "Output type (filesystem, s3)")
+	cmd.Flags().StringVarP(&opts.outputFormat, "output-format", "o", "json", "Output format (json, html)")
 	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name (required when --output=s3)")
 	cmd.Flags().StringVar(&opts.bucketRegion, "bucket-region", "", "S3 bucket region (required when --output=s3)")
-	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory for file output (required when --output=file)")
-	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
 	cmd.Flags().StringVar(&opts.organizationRole, "organization-role", "", "Role to assume for listing organization accounts")
 	cmd.Flags().StringVar(&opts.scannerRole, "scanner-role", "", "Role to assume for scanning accounts")
+	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
 
 	return cmd
 }
@@ -96,7 +116,7 @@ func getScanners(scannerList string) ([]aws.Scanner, error) {
 		if len(names) == 0 {
 			return nil, fmt.Errorf("no scanners available in registry")
 		}
-		
+
 		for _, name := range names {
 			scanner, err := aws.DefaultRegistry.GetScanner(name)
 			if err != nil {
@@ -197,7 +217,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				region := region
 				account := account
 
-				tasks = append(tasks, func(ctx context.Context) error {
+				tasks = append(tasks, worker.Task(func(ctx context.Context) error {
 					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
 					results, err := scanner.Scan(aws.ScanOptions{
@@ -208,6 +228,15 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
 						return err
+					}
+
+					// Add account and region info to each result
+					for i := range results {
+						if results[i].Details == nil {
+							results[i].Details = make(map[string]interface{})
+						}
+						results[i].Details["account_id"] = account.ID
+						results[i].Details["region"] = region
 					}
 
 					// Safely append results
@@ -227,7 +256,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, region, resultInterfaces)
 
 					return nil
-				})
+				}))
 			}
 		}
 	}
@@ -236,20 +265,53 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	pool := worker.NewPool(config.Config.MaxWorkers)
 	pool.ExecuteTasks(tasks)
 
-	// Create output writer
-	writer := output.NewWriter(output.Config{
-		Type:         output.Type(opts.output),
-		S3Bucket:     opts.bucket,
-		S3Region:     opts.bucketRegion,
-		OutputDir:    opts.outputDir,
-		Region:       regions[0], // Use first region for AWS operations
-	})
+	// Output results
+	switch opts.output {
+	case "filesystem":
+		switch opts.outputFormat {
+		case "json":
+			// Use writer for JSON filesystem output
+			writer := output.NewWriter(output.Config{
+				Type:      output.FileSystem,
+				OutputDir: "output",
+			})
 
-	// Write results for each account
-	for _, result := range accountResults {
-		if err := writer.Write(result.AccountID, result); err != nil {
-			return fmt.Errorf("failed to write results for account %s: %w", result.AccountID, err)
+			for accountID, result := range accountResults {
+				if err := writer.Write(accountID, result); err != nil {
+					return fmt.Errorf("error writing results for account %s: %v", accountID, err)
+				}
+			}
+		case "html":
+			// Create reports directory if it doesn't exist
+			if err := os.MkdirAll("reports", 0755); err != nil {
+				return fmt.Errorf("error creating reports directory: %v", err)
+			}
+
+			// Convert map of scan results to slice
+			var allResults []aws.ScanResult
+			for _, accountResult := range accountResults {
+				for _, scannerResults := range accountResult.Results {
+					for _, result := range scannerResults {
+						// Add account and region to details
+						if result.Details == nil {
+							result.Details = make(map[string]interface{})
+						}
+						result.Details["account_id"] = accountResult.AccountID
+						result.Details["account_name"] = accountResult.AccountName
+						allResults = append(allResults, result)
+					}
+				}
+			}
+
+			outputPath := "reports/scan_report.html"
+			if err := html.WriteHTML(allResults, outputPath); err != nil {
+				return fmt.Errorf("error writing HTML output: %v", err)
+			}
+			fmt.Printf("HTML report written to %s\n", outputPath)
 		}
+	case "s3":
+		// TODO: Implement S3 output
+		return fmt.Errorf("S3 output not yet implemented")
 	}
 
 	logging.ScanComplete(len(accountResults))
@@ -289,82 +351,60 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 	// Get and validate regions
 	var regions []string
 	if opts.regions == "" {
-		// If no regions specified, get all available regions
 		regions, err = aws.GetAvailableRegions(sess)
 		if err != nil {
-			return fmt.Errorf("failed to get available regions: %w", err)
+			return fmt.Errorf("failed to list regions: %w", err)
 		}
 	} else {
-		// Parse and validate comma-separated list of regions
 		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(sess, regions); err != nil {
-			return fmt.Errorf("invalid regions: %w", err)
-		}
 	}
 
-	// Log scan start with configuration
-	var scannerNames []string
-	for _, s := range scanners {
-		scannerNames = append(scannerNames, s.Label())
-	}
+	// Create a worker pool for parallel scanning
+	pool := worker.NewPool(10)
 
-	// Convert accounts to the format expected by the logger
-	var accountInfo []logging.Account
-	for _, acc := range accounts {
-		// For now, we just use the account ID as both ID and Name
-		// TODO: Add account alias/name resolution
-		accountInfo = append(accountInfo, logging.Account{
-			ID:   acc.ID,
-			Name: acc.Name,
-		})
-	}
+	// Create a channel to receive scan results
+	resultsChan := make(chan *scanContext, 100)
 
-	logging.ScanStart(scannerNames, accountInfo, regions)
+	// Create a map to store results by account
+	accountResults := make(map[string]*scanResult)
+	var accountResultsMutex sync.Mutex
 
-	// Create tasks for each scanner+region combination
+	// Create a task for each account/region/scanner combination
 	var tasks []worker.Task
-	var resultsMutex sync.Mutex
-	scanResults := make(map[string]map[string]aws.ScanResults) // accountID -> region -> results
-
-	// Initialize results for each account and region
-	for _, account := range accountInfo {
-		scanResults[account.ID] = make(map[string]aws.ScanResults)
+	for _, account := range accounts {
 		for _, region := range regions {
-			scanResults[account.ID][region] = aws.ScanResults{}
-		}
-	}
-
-	for _, scanner := range scanners {
-		for _, region := range regions {
-			for _, account := range accountInfo {
-				scanner := scanner // Create new variable for closure
-				region := region
+			for _, scanner := range scanners {
 				account := account
+				region := region
+				scanner := scanner
 
 				tasks = append(tasks, func(ctx context.Context) error {
-					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
-
+					// Run scanner
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
 						Role:       opts.scannerRole,
 					})
 					if err != nil {
-						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
-						return err
+						return fmt.Errorf("failed to scan %s in %s/%s: %w", scanner.Label(), account.ID, region, err)
 					}
 
-					// Safely append results
-					resultsMutex.Lock()
-					scanResults[account.ID][region] = append(scanResults[account.ID][region], results...)
-					resultsMutex.Unlock()
-
-					// Log completion with results
-					resultInterfaces := make([]interface{}, len(results))
-					for i, r := range results {
-						resultInterfaces[i] = r
+					// Add account and region info to each result
+					for i := range results {
+						if results[i].Details == nil {
+							results[i].Details = make(map[string]interface{})
+						}
+						results[i].Details["account_id"] = account.ID
+						results[i].Details["region"] = region
 					}
-					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, region, resultInterfaces)
+
+					// Send results to channel
+					resultsChan <- &scanContext{
+						AccountID:   account.ID,
+						AccountName: account.Name,
+						Region:      region,
+						Results:     results,
+					}
 
 					return nil
 				})
@@ -372,41 +412,80 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	// Create and run worker pool
-	pool := worker.NewPool(config.Config.MaxWorkers)
+	// Start a goroutine to collect results
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for result := range resultsChan {
+			accountResultsMutex.Lock()
+			if _, ok := accountResults[result.AccountID]; !ok {
+				accountResults[result.AccountID] = &scanResult{
+					AccountID:   result.AccountID,
+					AccountName: result.AccountName,
+					Results:     make(map[string]aws.ScanResults),
+				}
+			}
+			accountResults[result.AccountID].Results[result.Region] = result.Results
+			accountResultsMutex.Unlock()
+		}
+	}()
+
+	// Execute tasks
 	pool.ExecuteTasks(tasks)
 
-	// Create output writer
-	writer := output.NewWriter(output.Config{
-		Type:         output.Type(opts.output),
-		S3Bucket:     opts.bucket,
-		S3Region:     opts.bucketRegion,
-		OutputDir:    opts.outputDir,
-		Region:       regions[0], // Use first region for AWS operations
-	})
+	// Close results channel and wait for collector to finish
+	close(resultsChan)
+	wg.Wait()
 
-	// Write results for each account and region
-	for accountID, regionResults := range scanResults {
-		for region, results := range regionResults {
-			if len(results) == 0 {
-				continue // Skip empty results
+	// Output results
+	switch opts.output {
+	case "filesystem":
+		switch opts.outputFormat {
+		case "json":
+			// Use writer for JSON filesystem output
+			writer := output.NewWriter(output.Config{
+				Type:      output.FileSystem,
+				OutputDir: "output",
+			})
+
+			for accountID, result := range accountResults {
+				if err := writer.Write(accountID, result); err != nil {
+					return fmt.Errorf("error writing results for account %s: %v", accountID, err)
+				}
+			}
+		case "html":
+			// Create reports directory if it doesn't exist
+			if err := os.MkdirAll("reports", 0755); err != nil {
+				return fmt.Errorf("error creating reports directory: %v", err)
 			}
 
-			// Create scan context
-			ctx := &scanContext{
-				AccountID:   accountID,
-				AccountName: accountID, // TODO: Add account alias/name resolution
-				Region:      region,
-				Results:     results,
+			// Convert map of scan results to slice
+			var allResults []aws.ScanResult
+			for _, accountResult := range accountResults {
+				for _, scannerResults := range accountResult.Results {
+					for _, result := range scannerResults {
+						// Add account and region to details
+						if result.Details == nil {
+							result.Details = make(map[string]interface{})
+						}
+						result.Details["account_id"] = accountResult.AccountID
+						result.Details["account_name"] = accountResult.AccountName
+						allResults = append(allResults, result)
+					}
+				}
 			}
 
-			// Write results
-			if err := writer.Write(accountID, ctx); err != nil {
-				return fmt.Errorf("failed to write results for account %s in region %s: %w", accountID, region, err)
+			outputPath := "reports/scan_report.html"
+			if err := html.WriteHTML(allResults, outputPath); err != nil {
+				return fmt.Errorf("error writing HTML output: %v", err)
 			}
+			fmt.Printf("HTML report written to %s\n", outputPath)
 		}
+	case "s3":
+		// TODO: Implement S3 output
+		return fmt.Errorf("S3 output not yet implemented")
 	}
 
-	logging.ScanComplete(len(accountInfo))
 	return nil
 }

@@ -346,28 +346,50 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 						// Calculate total costs by combining instance and EBS costs
 						totalCosts = &awslib.CostBreakdown{}
-						if instanceCosts != nil {
-							totalCosts.HourlyRate = instanceCosts.HourlyRate
-							totalCosts.DailyRate = instanceCosts.DailyRate
-							totalCosts.MonthlyRate = instanceCosts.MonthlyRate
-							totalCosts.YearlyRate = instanceCosts.YearlyRate
-							totalCosts.Lifetime = instanceCosts.Lifetime
-							totalCosts.HoursRunning = instanceCosts.HoursRunning
-						}
+						// Always include EBS costs
 						if ebsCosts != nil {
-							totalCosts.HourlyRate += ebsCosts.HourlyRate
-							totalCosts.DailyRate += ebsCosts.DailyRate
-							totalCosts.MonthlyRate += ebsCosts.MonthlyRate
-							totalCosts.YearlyRate += ebsCosts.YearlyRate
-							if ebsCosts.Lifetime != nil {
+							totalCosts.HourlyRate = ebsCosts.HourlyRate
+							totalCosts.DailyRate = ebsCosts.DailyRate
+							totalCosts.MonthlyRate = ebsCosts.MonthlyRate
+							totalCosts.YearlyRate = ebsCosts.YearlyRate
+							totalCosts.Lifetime = ebsCosts.Lifetime
+							totalCosts.HoursRunning = ebsCosts.HoursRunning
+						}
+
+						// Only include instance costs if the instance is not stopped
+						if instanceState != "stopped" && instanceCosts != nil {
+							totalCosts.HourlyRate += instanceCosts.HourlyRate
+							totalCosts.DailyRate += instanceCosts.DailyRate
+							totalCosts.MonthlyRate += instanceCosts.MonthlyRate
+							totalCosts.YearlyRate += instanceCosts.YearlyRate
+							if instanceCosts.Lifetime != nil {
 								if totalCosts.Lifetime == nil {
-									totalCosts.Lifetime = ebsCosts.Lifetime
+									totalCosts.Lifetime = instanceCosts.Lifetime
 								} else {
-									lifetime := *totalCosts.Lifetime + *ebsCosts.Lifetime
+									lifetime := *totalCosts.Lifetime + *instanceCosts.Lifetime
 									totalCosts.Lifetime = &lifetime
 								}
 							}
+							if instanceCosts.HoursRunning != nil {
+								if totalCosts.HoursRunning == nil {
+									totalCosts.HoursRunning = instanceCosts.HoursRunning
+								} else {
+									// Use the max hours running between instance and EBS
+									if *instanceCosts.HoursRunning > *totalCosts.HoursRunning {
+										totalCosts.HoursRunning = instanceCosts.HoursRunning
+									}
+								}
+							}
 						}
+
+						// Debug cost information
+						logging.Debug("Cost breakdown for instance", map[string]interface{}{
+							"instance_id":     aws.StringValue(instance.InstanceId),
+							"state":           instanceState,
+							"instance_costs":  instanceCosts,
+							"ebs_costs":       ebsCosts,
+							"total_costs":     totalCosts,
+						})
 					}
 
 					// Build result details with all available attributes
@@ -459,75 +481,31 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						details["ebs_volumes"] = ebsDetails
 					}
 
-					// Build cost details - only include instance costs if the instance is stopped
-					costs := map[string]interface{}{}
-					if instanceState == "stopped" && instanceCosts != nil {
+					// Add costs to result
+					costs := map[string]interface{}{
+						"total": totalCosts,
+					}
+					if instanceState != "stopped" && instanceCosts != nil {
 						costs["instance"] = instanceCosts
 					}
 					if ebsCosts != nil {
 						costs["ebs"] = ebsCosts
 					}
-					if len(costs) > 0 {
-						// Calculate total costs
-						totalCosts := &awslib.CostBreakdown{
-							HourlyRate:  0,
-							DailyRate:   0,
-							MonthlyRate: 0,
-							YearlyRate:  0,
-						}
 
-						if costs["instance"] != nil {
-							ic := costs["instance"].(*awslib.CostBreakdown)
-							totalCosts.HourlyRate += ic.HourlyRate
-							totalCosts.DailyRate += ic.DailyRate
-							totalCosts.MonthlyRate += ic.MonthlyRate
-							totalCosts.YearlyRate += ic.YearlyRate
-							if ic.Lifetime != nil {
-								if totalCosts.Lifetime == nil {
-									totalCosts.Lifetime = ic.Lifetime
-								} else {
-									lifetime := *totalCosts.Lifetime + *ic.Lifetime
-									totalCosts.Lifetime = &lifetime
-								}
-							}
-						}
-
-						if costs["ebs"] != nil {
-							ec := costs["ebs"].(*awslib.CostBreakdown)
-							totalCosts.HourlyRate += ec.HourlyRate
-							totalCosts.DailyRate += ec.DailyRate
-							totalCosts.MonthlyRate += ec.MonthlyRate
-							totalCosts.YearlyRate += ec.YearlyRate
-							if ec.Lifetime != nil {
-								if totalCosts.Lifetime == nil {
-									totalCosts.Lifetime = ec.Lifetime
-								} else {
-									lifetime := *totalCosts.Lifetime + *ec.Lifetime
-									totalCosts.Lifetime = &lifetime
-								}
-							}
-						}
-
-						costs["total"] = totalCosts
-					}
-
-					// Log that we found a result
-					logging.Debug("Found unused EC2 instance", map[string]interface{}{
-						"account_id":    accountID,
-						"region":        opts.Region,
-						"resource_name": resourceName,
-						"resource_id":   aws.StringValue(instance.InstanceId),
-					})
-
-					results = append(results, awslib.ScanResult{
+					result := awslib.ScanResult{
 						ResourceType: s.Label(),
 						ResourceName: resourceName,
 						ResourceID:   aws.StringValue(instance.InstanceId),
-						Reason:       strings.Join(reasons, ", "),
-						Tags:         tags,
-						Details:      details,
-						Cost:         costs,
-					})
+						Details:     details,
+						Tags:       tags,
+						Cost:       costs,
+					}
+
+					if len(reasons) > 0 {
+						result.Reason = strings.Join(reasons, ", ")
+					}
+
+					results = append(results, result)
 				}
 			}
 			return !lastPage

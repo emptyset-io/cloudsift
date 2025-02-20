@@ -133,7 +133,7 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			if !s.checkNATGatewayAssociation(ec2Client, allocationID) {
 				// Calculate costs - Elastic IPs have a flat rate of $0.005 per hour when not attached
 				costs, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType:  "ElasticIP",
+					ResourceType: "ElasticIP",
 					ResourceSize: 1, // Flat rate per IP
 					Region:       opts.Region,
 					CreationTime: time.Now(), // Elastic IPs don't have creation time, use current time
@@ -148,24 +148,25 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				}
 
 				result := awslib.ScanResult{
-					ResourceID:   allocationID,
-					ResourceName: resourceName,
 					ResourceType: s.Label(),
+					ResourceName: resourceName,
+					ResourceID:   allocationID,
+					Reason:      "Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)",
 					Details: map[string]interface{}{
-						"allocation_id":     allocationID,
-						"public_ip":         aws.StringValue(addr.PublicIp),
-						"public_ipv4_pool": aws.StringValue(addr.PublicIpv4Pool),
-						"domain":           aws.StringValue(addr.Domain),
-						"instance_id":      aws.StringValue(addr.InstanceId),
-						"network_interface_id": aws.StringValue(addr.NetworkInterfaceId),
-						"network_interface_owner_id": aws.StringValue(addr.NetworkInterfaceOwnerId),
-						"private_ip_address": aws.StringValue(addr.PrivateIpAddress),
-						"carrier_ip":        aws.StringValue(addr.CarrierIp),
-						"customer_owned_ip": aws.StringValue(addr.CustomerOwnedIp),
+						"account_id":                accountID,
+						"region":                    opts.Region,
+						"public_ip":                 publicIP,
+						"allocation_id":             allocationID,
+						"domain":                   aws.StringValue(addr.Domain),
+						"network_interface_id":      aws.StringValue(addr.NetworkInterfaceId),
+						"network_interface_owner":   aws.StringValue(addr.NetworkInterfaceOwnerId),
+						"private_ip_address":        aws.StringValue(addr.PrivateIpAddress),
+						"public_ipv4_pool":          aws.StringValue(addr.PublicIpv4Pool),
+						"carrier_ip":               aws.StringValue(addr.CarrierIp),
+						"customer_owned_ip":         aws.StringValue(addr.CustomerOwnedIp),
 						"customer_owned_ipv4_pool": aws.StringValue(addr.CustomerOwnedIpv4Pool),
-						"network_border_group": aws.StringValue(addr.NetworkBorderGroup),
-						"association_id": aws.StringValue(addr.AssociationId),
-						"reasons": []string{"Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)"},
+						"network_border_group":      aws.StringValue(addr.NetworkBorderGroup),
+						"association_id":            aws.StringValue(addr.AssociationId),
 					},
 					Tags: tags,
 				}

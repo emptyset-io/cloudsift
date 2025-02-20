@@ -102,7 +102,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				hoursRunning := time.Since(*volume.CreateTime).Hours()
 
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType:  "EBSVolumes",
+					ResourceType: "EBSVolumes",
 					ResourceSize: volumeSize,
 					Region:       opts.Region,
 					CreationTime: *volume.CreateTime,
@@ -115,43 +115,46 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(volume.VolumeId),
 					})
+					continue
 				}
 
 				// Calculate lifetime cost
 				if costs != nil {
 					lifetime := roundCost(costs.HourlyRate * hoursRunning)
 					costs.Lifetime = &lifetime
+					hours := roundCost(hoursRunning)
+					costs.HoursRunning = &hours
 				}
 			}
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"volume_id":           aws.StringValue(volume.VolumeId),
-				"size":               aws.Int64Value(volume.Size),
-				"state":              aws.StringValue(volume.State),
-				"volume_type":        aws.StringValue(volume.VolumeType),
-				"iops":               aws.Int64Value(volume.Iops),
-				"throughput":         aws.Int64Value(volume.Throughput),
-				"encrypted":          aws.BoolValue(volume.Encrypted),
-				"kms_key_id":         aws.StringValue(volume.KmsKeyId),
-				"outpost_arn":        aws.StringValue(volume.OutpostArn),
-				"create_time":        volume.CreateTime.Format(time.RFC3339),
-				"hours_running":      time.Since(*volume.CreateTime).Hours(),
+				"volume_id":            aws.StringValue(volume.VolumeId),
+				"size":                 aws.Int64Value(volume.Size),
+				"state":                aws.StringValue(volume.State),
+				"volume_type":          aws.StringValue(volume.VolumeType),
+				"iops":                 aws.Int64Value(volume.Iops),
+				"throughput":           aws.Int64Value(volume.Throughput),
+				"encrypted":            aws.BoolValue(volume.Encrypted),
+				"kms_key_id":           aws.StringValue(volume.KmsKeyId),
+				"outpost_arn":          aws.StringValue(volume.OutpostArn),
+				"create_time":          volume.CreateTime.Format(time.RFC3339),
+				"hours_running":        time.Since(*volume.CreateTime).Hours(),
 				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
-				"fast_restored":       aws.BoolValue(volume.FastRestored),
-				"snapshot_id":         aws.StringValue(volume.SnapshotId),
-				"availability_zone":   aws.StringValue(volume.AvailabilityZone),
+				"fast_restored":        aws.BoolValue(volume.FastRestored),
+				"snapshot_id":          aws.StringValue(volume.SnapshotId),
+				"availability_zone":    aws.StringValue(volume.AvailabilityZone),
 			}
 
 			// Add attachments
 			var attachments []map[string]interface{}
 			for _, attachment := range volume.Attachments {
 				attachmentDetails := map[string]interface{}{
-					"attach_time":    aws.TimeValue(attachment.AttachTime).Format(time.RFC3339),
-					"device":         aws.StringValue(attachment.Device),
-					"instance_id":    aws.StringValue(attachment.InstanceId),
-					"state":          aws.StringValue(attachment.State),
-					"volume_id":      aws.StringValue(attachment.VolumeId),
+					"attach_time":           aws.TimeValue(attachment.AttachTime).Format(time.RFC3339),
+					"device":                aws.StringValue(attachment.Device),
+					"instance_id":           aws.StringValue(attachment.InstanceId),
+					"state":                 aws.StringValue(attachment.State),
+					"volume_id":             aws.StringValue(attachment.VolumeId),
 					"delete_on_termination": aws.BoolValue(attachment.DeleteOnTermination),
 				}
 				attachments = append(attachments, attachmentDetails)

@@ -1,0 +1,284 @@
+/* General Styles */
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #121212; /* Dark background */
+    color: #e0e0e0; /* Light gray text */
+    margin: 20px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 2rem;
+}
+
+.summary-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: space-between;
+}
+
+.summary-block {
+    background-color: #1e1e1e; /* Darker block background */
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+    flex: 1 1 45%; /* Flex for the first two blocks to be side by side */
+}
+
+.summary-block h3 {
+    margin-bottom: 10px;
+}
+
+/* Table Styling */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #1e1e1e;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.6);
+    margin-top: 20px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+    border: 1px solid #444;
+    min-width: 75px;
+    word-wrap: break-word; /* Allow text to wrap within cells */
+    overflow-wrap: break-word; /* Support text wrapping for better compatibility */
+}
+
+th {
+    background-color: #181818; /* Slightly darker for header */
+    font-weight: bold;
+}
+
+th .sort-icon {
+    margin-left: 5px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    color: #FF7F32; /* orange */
+}
+
+th.sorted .sort-icon {
+    color: #e06721; /* Darker orange for the active sorting column */
+}
+
+th .sort-icon {
+    color: #FF7F32;
+}
+
+/* Add styles for sorted icon (indicating ascending or descending) */
+th.sorted-asc .sort-icon {
+    content: "▲"; /* Ascending icon */
+}
+
+th.sorted-desc .sort-icon {
+    content: "▼"; /* Descending icon */
+}
+tr:nth-child(even) {
+    background-color: #242424; /* Even rows darker */
+}
+
+#resource-type-counts td:nth-child(2) a{
+    color: #FF7F32; /* orange */
+    cursor: pointer;
+}
+
+#resource-type-counts td:nth-child(2) {
+    color: #FF7F32; /* orange */
+    cursor: pointer;
+}
+
+tr:hover {
+    background-color: #333333; /* Highlight on hover */
+}
+
+/* Account Table Styling */
+.accounts-table td {
+    max-width: 500px;
+    word-wrap: break-word;
+}
+
+#scan-table td {
+    max-width: 150px;
+    word-wrap: break-word;
+}
+
+/* Search and Export Styles */
+.input-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+}
+
+input#search-input {
+    margin: 10px 0;
+    padding: 10px;
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid #FF7F32; /* orange */
+    border-radius: 4px;
+    background-color: #2a2a2a;
+    color: #ffffff;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+input#search-input::placeholder {
+    color: #888888; /* Light gray placeholder */
+}
+
+button.export-btn {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #ffffff;
+    background-color: #FF7F32; /* orange */
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap; /* Prevent text from wrapping */
+}
+
+button.export-btn:hover {
+    background-color: #e06721; /* Darker orange on hover */
+}
+
+#search-input {
+    position: relative;
+    padding-right: 30px; /* Space for the 'X' icon */
+    max-width: 80%; /* Make the input take up the full width of its container */
+    background-color: #e06721;
+}
+
+#clear-search {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #ffffff;
+    background-color: #FF7F32;
+    display: none; /* Initially hidden */
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#clear-search:hover {
+    background-color: #e06721;
+}
+
+/* Toggle Details Button */
+.toggle-button {
+    display: flex;
+    justify-content: flex-end;  /* Aligns the button to the right */
+    align-items: center;
+    gap: 0.3rem;
+    width: 100%;  /* Make the button take up full width of the td */
+    border: none;
+    background: none;
+    color: #FF7F32; /* orange for interactivity */
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.toggle-button:hover {
+    background: none;
+    color: #e06721; /* Darker orange on hover */
+}
+
+tr:hover {
+    background-color: #333333;
+    transform: scale(1.008);
+    transition: transform 0.2s ease;
+}
+
+/* Set up the transition for rotating the icon */
+.toggle-button .icon {
+    transition: transform 0.2s ease; /* Smooth transition for rotation */
+}
+
+/* Media Queries for Responsive Design */
+@media (max-width: 900px) {
+    .summary-block {
+        flex: 1 1 100%;
+    }
+
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    .input-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    input#search-input {
+        max-width: none;
+    }
+
+    button.export-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    body {
+        margin: 10px;
+    }
+
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    th, td {
+        padding: 8px;
+        font-size: 0.9rem;
+    }
+}
+
+/* Tooltip Styles */
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 200px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -100px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Styles for the details section */
+.details-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+}
+
+.details-content.expanded {
+    max-height: 500px; /* Adjust this value based on your needs */
+}
+
+.toggle-button.expanded .icon {
+    transform: rotate(180deg);
+}

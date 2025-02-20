@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudSift - Scan Report</title>
+    <style>/* General Styles */
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #121212; /* Dark background */
+    color: #e0e0e0; /* Light gray text */
+    margin: 20px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 2rem;
+}
+
+.summary-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: space-between;
+}
+
+.summary-block {
+    background-color: #1e1e1e; /* Darker block background */
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+    flex: 1 1 45%; /* Flex for the first two blocks to be side by side */
+}
+
+.summary-block h3 {
+    margin-bottom: 10px;
+}
+
+/* Table Styling */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #1e1e1e;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.6);
+    margin-top: 20px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+    border: 1px solid #444;
+    min-width: 75px;
+    word-wrap: break-word; /* Allow text to wrap within cells */
+    overflow-wrap: break-word; /* Support text wrapping for better compatibility */
+}
+
+th {
+    background-color: #181818; /* Slightly darker for header */
+    font-weight: bold;
+}
+
+th .sort-icon {
+    margin-left: 5px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    color: #FF7F32; /* orange */
+}
+
+th.sorted .sort-icon {
+    color: #e06721; /* Darker orange for the active sorting column */
+}
+
+th .sort-icon {
+    color: #FF7F32;
+}
+
+/* Add styles for sorted icon (indicating ascending or descending) */
+th.sorted-asc .sort-icon {
+    content: "▲"; /* Ascending icon */
+}
+
+th.sorted-desc .sort-icon {
+    content: "▼"; /* Descending icon */
+}
+tr:nth-child(even) {
+    background-color: #242424; /* Even rows darker */
+}
+
+#resource-type-counts td:nth-child(2) a{
+    color: #FF7F32; /* orange */
+    cursor: pointer;
+}
+
+#resource-type-counts td:nth-child(2) {
+    color: #FF7F32; /* orange */
+    cursor: pointer;
+}
+
+tr:hover {
+    background-color: #333333; /* Highlight on hover */
+}
+
+/* Account Table Styling */
+.accounts-table td {
+    max-width: 500px;
+    word-wrap: break-word;
+}
+
+#scan-table td {
+    max-width: 150px;
+    word-wrap: break-word;
+}
+
+/* Search and Export Styles */
+.input-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+}
+
+input#search-input {
+    margin: 10px 0;
+    padding: 10px;
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid #FF7F32; /* orange */
+    border-radius: 4px;
+    background-color: #2a2a2a;
+    color: #ffffff;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+input#search-input::placeholder {
+    color: #888888; /* Light gray placeholder */
+}
+
+button.export-btn {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #ffffff;
+    background-color: #FF7F32; /* orange */
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap; /* Prevent text from wrapping */
+}
+
+button.export-btn:hover {
+    background-color: #e06721; /* Darker orange on hover */
+}
+
+#search-input {
+    position: relative;
+    padding-right: 30px; /* Space for the 'X' icon */
+    max-width: 80%; /* Make the input take up the full width of its container */
+    background-color: #e06721;
+}
+
+#clear-search {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #ffffff;
+    background-color: #FF7F32;
+    display: none; /* Initially hidden */
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#clear-search:hover {
+    background-color: #e06721;
+}
+
+/* Toggle Details Button */
+.toggle-button {
+    display: flex;
+    justify-content: flex-end;  /* Aligns the button to the right */
+    align-items: center;
+    gap: 0.3rem;
+    width: 100%;  /* Make the button take up full width of the td */
+    border: none;
+    background: none;
+    color: #FF7F32; /* orange for interactivity */
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.toggle-button:hover {
+    background: none;
+    color: #e06721; /* Darker orange on hover */
+}
+
+tr:hover {
+    background-color: #333333;
+    transform: scale(1.008);
+    transition: transform 0.2s ease;
+}
+
+/* Set up the transition for rotating the icon */
+.toggle-button .icon {
+    transition: transform 0.2s ease; /* Smooth transition for rotation */
+}
+
+/* Media Queries for Responsive Design */
+@media (max-width: 900px) {
+    .summary-block {
+        flex: 1 1 100%;
+    }
+
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    .input-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    input#search-input {
+        max-width: none;
+    }
+
+    button.export-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 600px) {
+    body {
+        margin: 10px;
+    }
+
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    th, td {
+        padding: 8px;
+        font-size: 0.9rem;
+    }
+}
+
+/* Tooltip Styles */
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 200px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -100px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Styles for the details section */
+.details-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+}
+
+.details-content.expanded {
+    max-height: 500px; /* Adjust this value based on your needs */
+}
+
+.toggle-button.expanded .icon {
+    transform: rotate(180deg);
+}
+</style>
+    <script>document.addEventListener('DOMContentLoaded', function() {
+    // Add event listeners to all sort icons for column sorting
+    const sortIcons = document.querySelectorAll('.sort-icon');
+    
+    sortIcons.forEach((icon, index) => {
+        icon.addEventListener('click', function(event) {
+            event.stopPropagation(); // Prevent the event from bubbling up to the th
+            sortTable(index); // Pass the index of the column that was clicked
+        });
+    });
+
+    // Other event listeners (e.g., for count cells and clear search) remain unchanged
+    const countCells = document.querySelectorAll('#resource-type-counts td:nth-child(2)');
+    const clearSearch = document.getElementById('clear-search');
+    countCells.forEach(cell => {
+        cell.addEventListener('click', function() {
+            // Get the resource type from the first column of the same row
+            const resourceType = this.previousElementSibling.textContent.trim();
+            
+            // Set the search input value to the resource type
+            const searchInput = document.getElementById('search-input');
+            searchInput.value = resourceType;
+            clearSearch.style.display = 'inline'; // Show the clear icon
+            // Trigger the table filter to show the filtered results
+            filterTable();
+        });
+    });
+
+    // Show the clear search icon when there is text in the input
+    const searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('input', function() {
+        const clearSearch = document.getElementById('clear-search');
+        if (this.value) {
+            clearSearch.style.display = 'inline'; // Show the clear icon
+        } else {
+            clearSearch.style.display = 'none'; // Hide the clear icon
+        }
+    });
+});
+
+function scrollToUnusedResources(event, resourceType) {
+    event.preventDefault();  // Prevent the default anchor behavior
+
+    // Find the "Unused Resources" section and scroll to it
+    const section = document.getElementById('unused-resources');
+    if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+        console.error("Element with id 'unused-resources' not found.");
+    }
+}
+
+// The filterTable function which filters the table rows based on the search input
+function filterTable() {
+    const input = document.getElementById('search-input');
+    const filter = input.value.toLowerCase();
+    const table = document.getElementById('scan-table');
+    const rows = table.getElementsByTagName('tr');
+    
+    for (let i = 1; i < rows.length; i++) { // Start at 1 to skip the header row
+        const cells = rows[i].getElementsByTagName('td');
+        let rowVisible = false;
+        
+        for (let j = 0; j < cells.length; j++) {
+            const cell = cells[j];
+            if (cell && cell.textContent.toLowerCase().includes(filter)) {
+                rowVisible = true;
+                break;
+            }
+        }
+        
+        // Display the row if it matches the filter, otherwise hide it
+        rows[i].style.display = rowVisible ? '' : 'none';
+    }
+}
+
+// The clearSearch function which clears the input and shows all rows
+function clearSearch() {
+    const searchInput = document.getElementById('search-input');
+    const clearSearch = document.getElementById('clear-search');
+    
+    searchInput.value = ''; // Clear the input field
+    clearSearch.style.display = 'none'; // Hide the clear icon
+    
+    // Show all rows in the table
+    const table = document.getElementById('scan-table');
+    const rows = table.getElementsByTagName('tr');
+    for (let i = 1; i < rows.length; i++) {
+        rows[i].style.display = ''; // Reset the display to show all rows
+    }
+}
+
+// Sorting table columns
+function sortTable(columnIndex) {
+    const table = document.querySelector('#scan-table');
+    const rows = Array.from(table.rows).slice(1); // Skip the header row
+    const ths = table.querySelectorAll('th'); // Get all header cells
+    let isAsc = ths[columnIndex].classList.contains('sorted-asc');
+    
+    // Reset all header icons to the default "↕"
+    ths.forEach((th) => {
+        th.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
+        th.querySelector('.sort-icon').textContent = '↕';
+    });
+
+    // Update the clicked column's sort icon
+    ths[columnIndex].classList.add('sorted');
+    ths[columnIndex].querySelector('.sort-icon').textContent = isAsc ? '▼' : '▲';
+    ths[columnIndex].classList.add(isAsc ? 'sorted-desc' : 'sorted-asc');
+
+    // Sort rows based on the selected column
+    rows.sort((rowA, rowB) => {
+        const cellA = rowA.cells[columnIndex].textContent.trim();
+        const cellB = rowB.cells[columnIndex].textContent.trim();
+
+        // Compare the values depending on column type
+        return (isAsc ? cellA.localeCompare(cellB) : cellB.localeCompare(cellA));
+    });
+
+    // Reattach sorted rows
+    rows.forEach((row) => table.appendChild(row));
+}
+
+// Toggle details visibility
+function toggleDetails(button, detailsId) {
+    const details = document.getElementById(detailsId);
+    const isCollapsed = details.dataset.collapsed === "true";
+    details.dataset.collapsed = !isCollapsed;
+
+    const text = button.querySelector('.text');
+    const icon = button.querySelector('.icon');
+
+    if (isCollapsed) {
+        details.innerHTML = details.dataset.fullText;
+        text.textContent = 'Show less';
+    } else {
+        details.innerHTML = details.dataset.shortText;
+        text.textContent = 'Show more';
+    }
+
+    // Toggle the expanded class to rotate the icon
+    button.classList.toggle('expanded');
+}
+
+// Export table data to CSV
+function exportTableToCSV(filename) {
+    const table = document.getElementById('scan-table');
+    const rows = table.querySelectorAll('tr');
+    const csvData = [];
+
+    // Loop through rows and cells to create CSV rows
+    rows.forEach((row, index) => {
+        const cells = row.querySelectorAll('td, th');
+        const rowData = [];
+        
+        cells.forEach(cell => {
+            // Check if the cell contains a div with details, exclude the button
+            const detailsDiv = cell.querySelector('div');
+            if (detailsDiv) {
+                // Use the full text details from the div without the button
+                rowData.push(`"${detailsDiv.getAttribute('data-full-text').replace(/<br>/g, "\n").trim()}"`);
+            } else {
+                // Otherwise, just push the cell's text
+                rowData.push(`"${cell.innerText.trim().replace(/[⬇⬍⬆]/g, "")}"`);
+            }
+        });
+        
+        if (rowData.length) {
+            csvData.push(rowData.join(','));
+        }
+    });
+
+    // Create a CSV string from the data
+    const csvString = csvData.join('\n');
+
+    // Trigger a download
+    const link = document.createElement('a');
+    link.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvString));
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Convert UTC time to the user's local timezone and display
+function convertToLocalTime(utcTimeString) {
+    const utcDate = new Date(utcTimeString);
+    const localDate = utcDate.toLocaleString(); // Convert to local timezone format
+    return localDate;
+}
+
+// Set the generated report time in the local timezone
+function displayLocalReportTime() {
+    const reportTimeElement = document.getElementById('generated-time');
+    
+    if (reportTimeElement) {
+        const utcTime = reportTimeElement.getAttribute('data-utc-time');
+        const localTime = convertToLocalTime(utcTime * 1000); // Convert seconds to milliseconds
+        reportTimeElement.textContent = `${localTime}`;
+    }
+}
+
+// Add tooltips for "N/A"
+function addTooltipsForNA() {
+    const cells = document.querySelectorAll('td');
+    cells.forEach(cell => {
+        if (cell.textContent.trim() === 'N/A') {
+            cell.classList.add('tooltip');
+            const tooltipSpan = document.createElement('span');
+            tooltipSpan.classList.add('tooltiptext');
+            tooltipSpan.textContent = 'This resource does not have a cost calculation available';
+            cell.appendChild(tooltipSpan);
+        }
+    });
+}
+
+// Call the function on document load
+document.addEventListener("DOMContentLoaded", addTooltipsForNA);
+</script>
+</head>
+<body>
+    <h1>Scan Report</h1>
+    <div class="summary-container">
+        
+        <div class="summary-block">
+            <h3>Scanned Accounts and Regions</h3>
+            <table class="accounts-table">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Regions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                        <tr>
+                            <td class="account-id">970547342409</td>
+                            <td class="region-list">us-west-2</td>
+                        </tr>
+                    
+                </tbody>
+            </table>
+        </div>
+
+        
+        <div class="summary-block">
+            <h3>Resource Type Counts</h3>
+            <table id="resource-type-counts">
+                <thead>
+                    <tr>
+                        <th>Resource Type</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td>EBS Snapshots</td>
+                        <td>
+                            <a href="javascript:void(0)" onclick="scrollToUnusedResources(event, 'EBS Snapshots')">1</a>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>EBS Volumes</td>
+                        <td>
+                            <a href="javascript:void(0)" onclick="scrollToUnusedResources(event, 'EBS Volumes')">1</a>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>EC2 Instances</td>
+                        <td>
+                            <a href="javascript:void(0)" onclick="scrollToUnusedResources(event, 'EC2 Instances')">1</a>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>Elastic IPs</td>
+                        <td>
+                            <a href="javascript:void(0)" onclick="scrollToUnusedResources(event, 'Elastic IPs')">1</a>
+                        </td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+            <br />
+            <div class="summary-block" id="unused-resources">
+               <h3>Combined Cost Breakdown for AWS Resources</h3>
+                <table id="combined-costs">
+                    <thead>
+                        <tr>
+                            <th>Resource Type</th>
+                            <th>Hourly</th>
+                            <th>Daily</th>
+                            <th>Monthly</th>
+                            <th>Yearly</th>
+                            <th>Lifetime</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                        <tr>
+                            <td>EBS Snapshots</td>
+                            <td>$0.0001</td>
+                            <td>$0.002</td>
+                            <td>$0.05</td>
+                            <td>$0.60</td>
+                            <td>
+                                
+                                    $0.0000
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td>EBS Volumes</td>
+                            <td>$0.0001</td>
+                            <td>$0.003</td>
+                            <td>$0.08</td>
+                            <td>$0.96</td>
+                            <td>
+                                
+                                    $0.0000
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td>EC2 Instances</td>
+                            <td>$0.0005</td>
+                            <td>$0.013</td>
+                            <td>$0.39</td>
+                            <td>$4.80</td>
+                            <td>
+                                
+                                    $0.0000
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td>Elastic IPs</td>
+                            <td>$0.0050</td>
+                            <td>$0.120</td>
+                            <td>$3.60</td>
+                            <td>$43.80</td>
+                            <td>
+                                
+                                    N/A
+                                
+                            </td>
+                        </tr>
+                        
+                    </tbody>
+                </table>
+            </div>
+            <br />
+            <br />
+            <h3>Scan Metrics</h3>
+            <table id="scan-metrics">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Total Number of Scans</td>
+                        <td>4</td>
+                    </tr>
+                    <tr>
+                        <td>Average Scans per Second</td>
+                        <td>7774.508165177201</td>
+                    </tr>
+                    <tr>
+                        <td>Overall Scan Time</td>
+                        <td>0.000514502 seconds</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>     
+
+        
+        <div class="summary-block">
+            <h3>Unused Resources</h3>
+            <div class="input-container">
+                <div style="position: relative; width: 100%;">
+                    <input type="text" id="search-input" placeholder="Search table..." onkeyup="filterTable()" />
+                    <button id="clear-search" onclick="clearSearch()">Clear</button>
+                </div>
+                <button class="export-btn" onclick="exportTableToCSV('scan_report.csv')">Export to CSV</button>
+            </div>
+            <table id="scan-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortTable(0)">Account <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(1)">Region <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(2)">Resource Type <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(3)">Name <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(4)">Resource ID <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(5)">Reason <span class="sort-icon">↕</span></th>
+                        <th onclick="sortTable(6)">Details <span class="sort-icon">↕</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td>970547342409</td>
+                        <td>us-west-2</td>
+                        <td>Elastic IPs</td>
+                        <td>44.245.120.235</td>
+                        <td>eipalloc-07f5e9c33cd640f84</td>
+                        <td>Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)</td>
+                        <td>
+                        
+                        <button class="toggle-button" onclick="toggleDetails(this, 'details_eipalloc-07f5e9c33cd640f84')">
+                            <span class="text">Show more</span>
+                            <span class="icon">▼</span>
+                        </button>
+
+                        
+                        <div id="details_eipalloc-07f5e9c33cd640f84" data-collapsed="true" data-short-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;..." data-full-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;: &#34;Billing&#34;,
+  &#34;allocation_id&#34;: &#34;eipalloc-07f5e9c33cd640f84&#34;,
+  &#34;association_id&#34;: &#34;&#34;,
+  &#34;carrier_ip&#34;: &#34;&#34;,
+  &#34;customer_owned_ip&#34;: &#34;&#34;,
+  &#34;customer_owned_ipv4_pool&#34;: &#34;&#34;,
+  &#34;domain&#34;: &#34;vpc&#34;,
+  &#34;network_border_group&#34;: &#34;us-west-2&#34;,
+  &#34;network_interface_id&#34;: &#34;&#34;,
+  &#34;network_interface_owner&#34;: &#34;&#34;,
+  &#34;private_ip_address&#34;: &#34;&#34;,
+  &#34;public_ip&#34;: &#34;44.245.120.235&#34;,
+  &#34;public_ipv4_pool&#34;: &#34;amazon&#34;,
+  &#34;region&#34;: &#34;us-west-2&#34;
+}">
+                            {
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;...
+                        </div>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>970547342409</td>
+                        <td>us-west-2</td>
+                        <td>EBS Volumes</td>
+                        <td>vol-07666dc7b3a41a083</td>
+                        <td>vol-07666dc7b3a41a083</td>
+                        <td>1GB volume, unused for 1 days</td>
+                        <td>
+                        
+                        <button class="toggle-button" onclick="toggleDetails(this, 'details_vol-07666dc7b3a41a083')">
+                            <span class="text">Show more</span>
+                            <span class="icon">▼</span>
+                        </button>
+
+                        
+                        <div id="details_vol-07666dc7b3a41a083" data-collapsed="true" data-short-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;..." data-full-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;: &#34;Billing&#34;,
+  &#34;availability_zone&#34;: &#34;us-west-2a&#34;,
+  &#34;create_time&#34;: &#34;2025-02-19T18:47:40Z&#34;,
+  &#34;encrypted&#34;: true,
+  &#34;fast_restored&#34;: false,
+  &#34;hours_running&#34;: 27.348596373533333,
+  &#34;iops&#34;: 3000,
+  &#34;kms_key_id&#34;: &#34;arn:aws:kms:us-west-2:970547342409:key/7eb42898-b79f-4d17-99b9-b629eb34467b&#34;,
+  &#34;multi_attach_enabled&#34;: false,
+  &#34;outpost_arn&#34;: &#34;&#34;,
+  &#34;region&#34;: &#34;us-west-2&#34;,
+  &#34;size&#34;: 1,
+  &#34;snapshot_id&#34;: &#34;&#34;,
+  &#34;state&#34;: &#34;available&#34;,
+  &#34;throughput&#34;: 125,
+  &#34;volume_id&#34;: &#34;vol-07666dc7b3a41a083&#34;,
+  &#34;volume_type&#34;: &#34;gp3&#34;
+}">
+                            {
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;...
+                        </div>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>970547342409</td>
+                        <td>us-west-2</td>
+                        <td>EBS Snapshots</td>
+                        <td>test</td>
+                        <td>snap-0b15ff3bc1919b19a</td>
+                        <td>1GB snapshot from 2025-02-20, unused for 0 days</td>
+                        <td>
+                        
+                        <button class="toggle-button" onclick="toggleDetails(this, 'details_snap-0b15ff3bc1919b19a')">
+                            <span class="text">Show more</span>
+                            <span class="icon">▼</span>
+                        </button>
+
+                        
+                        <div id="details_snap-0b15ff3bc1919b19a" data-collapsed="true" data-short-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;..." data-full-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;: &#34;Billing&#34;,
+  &#34;data_encryption_key_id&#34;: &#34;&#34;,
+  &#34;description&#34;: &#34;test&#34;,
+  &#34;encrypted&#34;: true,
+  &#34;hours_running&#34;: 3.0536520987244447,
+  &#34;kms_key_id&#34;: &#34;arn:aws:kms:us-west-2:970547342409:key/7eb42898-b79f-4d17-99b9-b629eb34467b&#34;,
+  &#34;owner_alias&#34;: &#34;&#34;,
+  &#34;owner_id&#34;: &#34;970547342409&#34;,
+  &#34;progress&#34;: &#34;100%&#34;,
+  &#34;region&#34;: &#34;us-west-2&#34;,
+  &#34;snapshot_id&#34;: &#34;snap-0b15ff3bc1919b19a&#34;,
+  &#34;start_time&#34;: &#34;2025-02-20T19:05:22Z&#34;,
+  &#34;state&#34;: &#34;completed&#34;,
+  &#34;state_message&#34;: &#34;&#34;,
+  &#34;storage_tier&#34;: {
+    &#34;tier&#34;: &#34;standard&#34;
+  },
+  &#34;volume_id&#34;: &#34;vol-07666dc7b3a41a083&#34;,
+  &#34;volume_size&#34;: 1,
+  &#34;volume_type&#34;: &#34;gp3&#34;
+}">
+                            {
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;...
+                        </div>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <td>970547342409</td>
+                        <td>us-west-2</td>
+                        <td>EC2 Instances</td>
+                        <td>test</td>
+                        <td>i-0653e7a79a0a006ac</td>
+                        <td>Stopped for 0 days</td>
+                        <td>
+                        
+                        <button class="toggle-button" onclick="toggleDetails(this, 'details_i-0653e7a79a0a006ac')">
+                            <span class="text">Show more</span>
+                            <span class="icon">▼</span>
+                        </button>
+
+                        
+                        <div id="details_i-0653e7a79a0a006ac" data-collapsed="true" data-short-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;..." data-full-text="{
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;: &#34;Billing&#34;,
+  &#34;ami_id&#34;: &#34;ami-09245d5773578a1d6&#34;,
+  &#34;architecture&#34;: &#34;x86_64&#34;,
+  &#34;block_device_mappings&#34;: [
+    {
+      &#34;device_name&#34;: &#34;/dev/xvda&#34;,
+      &#34;ebs&#34;: {
+        &#34;attach_time&#34;: &#34;2025-02-20T18:52:24Z&#34;,
+        &#34;delete_on_termination&#34;: true,
+        &#34;status&#34;: &#34;attached&#34;,
+        &#34;volume_id&#34;: &#34;vol-09aca55c9478481e0&#34;
+      }
+    }
+  ],
+  &#34;ebs_optimized&#34;: false,
+  &#34;ebs_volumes&#34;: [
+    {
+      &#34;HoursRunning&#34;: 3.270044748249722,
+      &#34;SizeGB&#34;: 8,
+      &#34;VolumeId&#34;: &#34;vol-09aca55c9478481e0&#34;,
+      &#34;VolumeType&#34;: &#34;standard&#34;
+    }
+  ],
+  &#34;ena_support&#34;: true,
+  &#34;hours_running&#34;: 3.2700861487869446,
+  &#34;hypervisor&#34;: &#34;xen&#34;,
+  &#34;instance_id&#34;: &#34;i-0653e7a79a0a006ac&#34;,
+  &#34;instance_type&#34;: &#34;t2.nano&#34;,
+  &#34;kernel_id&#34;: &#34;&#34;,
+  &#34;key_name&#34;: &#34;&#34;,
+  &#34;launch_time&#34;: &#34;2025-02-20T18:52:24Z&#34;,
+  &#34;monitoring_state&#34;: &#34;disabled&#34;,
+  &#34;network_interfaces&#34;: [
+    {
+      &#34;description&#34;: &#34;&#34;,
+      &#34;mac_address&#34;: &#34;06:44:a8:11:ff:95&#34;,
+      &#34;network_interface_id&#34;: &#34;eni-0dcd9e636a6c4af8c&#34;,
+      &#34;private_dns_name&#34;: &#34;ip-172-31-41-174.us-west-2.compute.internal&#34;,
+      &#34;private_ip_address&#34;: &#34;172.31.41.174&#34;,
+      &#34;source_dest_check&#34;: true,
+      &#34;status&#34;: &#34;in-use&#34;,
+      &#34;subnet_id&#34;: &#34;subnet-0bb22eb8a2707564d&#34;,
+      &#34;vpc_id&#34;: &#34;vpc-0a13563894dc47d1b&#34;
+    }
+  ],
+  &#34;placement&#34;: {
+    &#34;affinity&#34;: &#34;&#34;,
+    &#34;availability_zone&#34;: &#34;us-west-2a&#34;,
+    &#34;group_name&#34;: &#34;&#34;,
+    &#34;host_id&#34;: &#34;&#34;,
+    &#34;tenancy&#34;: &#34;default&#34;
+  },
+  &#34;platform&#34;: &#34;&#34;,
+  &#34;private_dns_name&#34;: &#34;ip-172-31-41-174.us-west-2.compute.internal&#34;,
+  &#34;private_ip_address&#34;: &#34;172.31.41.174&#34;,
+  &#34;public_dns_name&#34;: &#34;&#34;,
+  &#34;public_ip_address&#34;: &#34;&#34;,
+  &#34;ramdisk_id&#34;: &#34;&#34;,
+  &#34;region&#34;: &#34;us-west-2&#34;,
+  &#34;root_device_name&#34;: &#34;/dev/xvda&#34;,
+  &#34;root_device_type&#34;: &#34;ebs&#34;,
+  &#34;security_groups&#34;: [
+    {
+      &#34;group_id&#34;: &#34;sg-04ef875b069802fed&#34;,
+      &#34;group_name&#34;: &#34;launch-wizard-1&#34;
+    }
+  ],
+  &#34;source_dest_check&#34;: true,
+  &#34;state&#34;: &#34;stopped&#34;,
+  &#34;state_code&#34;: 80,
+  &#34;state_reason&#34;: &#34;Client.UserInitiatedShutdown: User initiated shutdown&#34;,
+  &#34;subnet_id&#34;: &#34;subnet-0bb22eb8a2707564d&#34;,
+  &#34;virtualization_type&#34;: &#34;hvm&#34;,
+  &#34;vpc_id&#34;: &#34;vpc-0a13563894dc47d1b&#34;
+}">
+                            {
+  &#34;account_id&#34;: &#34;970547342409&#34;,
+  &#34;account_name&#34;...
+                        </div>
+                        </td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
