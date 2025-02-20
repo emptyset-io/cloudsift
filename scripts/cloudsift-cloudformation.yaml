@@ -1,25 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  Template to set up:
-  1. An organization role in the management account (with permissions to read organization details).
-  2. A scanner role for sub accounts (with ReadOnly permissions) that is assumable by the organization role.
-  3. An S3 bucket in the management account that is writable by the scanner role.
+Description: "CloudFormation template to create organization IAM roles and StackSet for sub-accounts."
 
 Parameters:
   OrganizationRole:
     Type: String
-    Description: "Name for the IAM role in the management account that has permissions to read organization details."
+    Default: CloudSiftOrgRole
+    Description: "IAM Role in the Organization Management Account to assume Scanner Role."
+  
   ScannerRole:
     Type: String
-    Description: "Name for the scanner role in sub accounts that should have ReadOnly permissions."
+    Default: CloudSiftScannerRole
+    Description: "IAM Role to be deployed in sub-accounts."
+
   BucketName:
     Type: String
-    Description: "Name of the S3 bucket to be created in the management account."
+    Default: "cloudsift-logs"
+    Description: "S3 bucket for storing scan results."
+  
   BucketRegion:
     Type: String
-    Description: "Region for the S3 bucket (should match the stack's region)."
+    Default: "us-west-2"
+    Description: "AWS region where the S3 bucket should be created."
 
 Resources:
+  # 1️⃣ Organization Role (Management Account)
   OrganizationIAMRole:
     Type: AWS::IAM::Role
     Properties:
@@ -28,68 +32,67 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            # Allows the account’s root to assume this role; adjust as needed.
             Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: OrgReadPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - organizations:ListAccounts
-                  - organizations:DescribeOrganization
-                  - organizations:ListRoots
-                  - organizations:ListOrganizationalUnitsForParent
-                Resource: "*"
-
-  ScannerIAMRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Ref ScannerRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            # Allow the organization role (from the management account) to assume this role.
-            Principal:
-              AWS: !GetAtt OrganizationIAMRole.Arn
+              Service: "organizations.amazonaws.com"
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/ReadOnlyAccess
 
-  S3Bucket:
+  # 2️⃣ S3 Bucket (Management Account)
+  CloudSiftS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref BucketName
 
-  S3BucketPolicy:
+  CloudSiftS3BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref S3Bucket
+      Bucket: !Ref CloudSiftS3Bucket
       PolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-          - Sid: AllowScannerRoleWriteAccess
-            Effect: Allow
+          - Effect: Allow
             Principal:
-              # This grants write permissions to any role with the name provided by the ScannerRole parameter.
               AWS: !Sub "arn:aws:iam::*:role/${ScannerRole}"
-            Action:
-              - s3:PutObject
-              - s3:PutObjectAcl
+            Action: "s3:PutObject"
             Resource: !Sub "arn:aws:s3:::${BucketName}/*"
 
-Outputs:
-  OrganizationRoleARN:
-    Description: "ARN of the organization role."
-    Value: !GetAtt OrganizationIAMRole.Arn
-  ScannerRoleARN:
-    Description: "ARN of the scanner role (when deployed in a sub account)."
-    Value: !GetAtt ScannerIAMRole.Arn
-  S3BucketName:
-    Description: "Name of the created S3 bucket."
-    Value: !Ref S3Bucket
+  # 3️⃣ StackSet for Scanner Role (Sub-Accounts)
+  CloudSiftStackSet:
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      StackSetName: "CloudSift-Scanner-Role-StackSet"
+      PermissionModel: SERVICE_MANAGED
+      AutoDeployment:
+        Enabled: true
+        RetainStacksOnAccountRemoval: false
+      Capabilities:
+        - CAPABILITY_NAMED_IAM
+      TemplateBody: |
+        AWSTemplateFormatVersion: '2010-09-09'
+        Description: "Deploy Scanner IAM Role in all sub-accounts."
+        Parameters:
+          ScannerRole:
+            Type: String
+          OrganizationRoleARN:
+            Type: String
+        Resources:
+          ScannerIAMRole:
+            Type: AWS::IAM::Role
+            Properties:
+              RoleName: !Ref ScannerRole
+              AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      AWS: !Ref OrganizationRoleARN
+                    Action: sts:AssumeRole
+              ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Parameters:
+        - ParameterKey: ScannerRole
+          ParameterValue: !Ref ScannerRole
+        - ParameterKey: OrganizationRoleARN
+          ParameterValue: !Sub "arn:aws:iam::${AWS::AccountId}:role/${OrganizationRole}"
 
