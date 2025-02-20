@@ -1,0 +1,652 @@
+/* Modern Cloudsift Theme */
+:root {
+    --primary-bg: #f5f5f7;
+    --secondary-bg: #ffffff;
+    --card-bg: #ffffff;
+    --text-primary: #1d1d1f;
+    --text-secondary: #424245;
+    --accent: rgb(60, 52, 156);
+    --accent-light: rgba(60, 52, 156, 0.1);
+    --accent-medium: rgba(60, 52, 156, 0.5);
+    --border-color: rgba(0, 0, 0, 0.1);
+    --border-radius: 12px;
+    --transition: all 0.3s ease;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--primary-bg);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 2rem;
+    line-height: 1.5;
+}
+
+header {
+    background: linear-gradient(135deg, var(--accent), var(--accent-medium));
+    margin: -2rem -2rem 2rem -2rem;
+    padding: 3rem 2rem;
+    color: white;
+    text-align: center;
+}
+
+h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+    color: white;
+}
+
+.header-subtitle {
+    color: rgba(255, 255, 255, 0.9);
+    margin-top: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.summary-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 1.5rem;
+}
+
+.summary-row {
+    display: flex;
+    gap: 1.5rem;
+    width: 100%;
+}
+
+.summary-row .summary-block {
+    flex: 1;
+    min-width: 0;
+}
+
+.summary-row .summary-block.wide {
+    flex: 2;
+}
+
+.summary-block {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.summary-block.chart {
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+}
+
+#unused-resources {
+    flex: 0 0 100%;
+    max-width: 100%;
+    margin-top: 2rem;
+}
+
+.summary-block::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-medium));
+    opacity: 0;
+    transition: var(--transition);
+}
+
+.summary-block:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.1);
+}
+
+.summary-block:hover::after {
+    opacity: 1;
+}
+
+.summary-block h3 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.25rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.summary-block h3 svg {
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--accent);
+}
+
+/* Chart Container */
+.chart-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-top: 1rem;
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-shrink: 0;
+}
+
+.chart-content {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+}
+
+.chart-header h4 {
+    margin: 0;
+    color: #1d1d1f;
+    font-size: 1.1rem;
+}
+
+.cost-period-selector {
+    display: flex;
+    gap: 0.5rem;
+    background: #f5f5f7;
+    padding: 0.25rem;
+    border-radius: 6px;
+}
+
+.cost-period-btn {
+    background: none;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    color: #1d1d1f;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cost-period-btn:hover {
+    background: rgba(60, 52, 156, 0.1);
+}
+
+.cost-period-btn.active {
+    background: rgb(60, 52, 156);
+    color: white;
+}
+
+/* Table Styling */
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: var(--card-bg);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+.wide table {
+    font-size: 0.9rem;
+}
+
+th, td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.wide th, .wide td {
+    padding: 0.75rem;
+}
+
+th {
+    background-color: var(--accent-light);
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+}
+
+td {
+    color: var(--text-secondary);
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+tr:hover {
+    background-color: var(--accent-light);
+}
+
+.total-row {
+    font-weight: bold;
+    background-color: var(--accent-light);
+    border-top: 2px solid var(--accent);
+}
+
+.total-row td {
+    padding: 1rem 0.75rem !important;
+    color: var(--accent);
+}
+
+/* Table wrapper for horizontal scrolling on mobile */
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: var(--border-radius);
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Specific styles for #scan-table */
+#scan-table {
+    table-layout: auto;
+    width: 100%;
+}
+
+#scan-table .table-wrapper {
+    overflow-x: auto;
+    margin: 0 -1.5rem;
+    padding: 0 1.5rem;
+}
+
+#scan-table td {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 12px;
+}
+
+#scan-table td:hover {
+    white-space: normal;
+    word-wrap: break-word;
+    background-color: var(--accent-light);
+}
+
+#scan-table th {
+    position: sticky;
+    top: 0;
+    background-color: var(--accent-light);
+    z-index: 1;
+    white-space: nowrap;
+    padding: 12px;
+}
+
+/* Search Input Styling */
+.input-container {
+    margin-bottom: 1.5rem;
+    position: relative;
+    display: flex;
+    gap: 1rem;
+}
+
+.search-icon {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+#search-input {
+    flex: 1;
+    padding: 0.75rem 1rem 0.75rem 2.5rem;
+    font-size: 1rem;
+    background-color: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    color: var(--text-primary);
+    transition: var(--transition);
+}
+
+#search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+#search-input::placeholder {
+    color: var(--text-secondary);
+}
+
+/* Search and export container styles */
+#unused-resources .header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+#unused-resources .search-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#unused-resources .export-container {
+    margin-left: auto;
+}
+
+/* Button Styles */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.btn:hover {
+    background-color: var(--accent-medium);
+}
+
+.btn svg {
+    width: 1rem;
+    height: 1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Resource Type Count Links */
+#resource-type-counts td:nth-child(2) a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#resource-type-counts td:nth-child(2) a:hover {
+    opacity: 0.8;
+}
+
+#resource-type-counts td:nth-child(2) a svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+/* Sort Icons */
+.sort-icon {
+    display: inline-block;
+    margin-left: 0.5rem;
+    opacity: 0.5;
+    transition: var(--transition);
+}
+
+th:hover .sort-icon {
+    opacity: 1;
+}
+
+th.sorted-asc .sort-icon,
+th.sorted-desc .sort-icon {
+    opacity: 1;
+    color: var(--accent);
+}
+
+/* Tooltip Styles */
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    background-color: var(--card-bg);
+    color: var(--text-primary);
+    text-align: center;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: var(--transition);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border-color);
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Toggle Details Button */
+.toggle-button {
+    padding: 0.5rem 1rem;
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.toggle-button:hover {
+    background-color: var(--accent-medium);
+}
+
+.toggle-button svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+/* Modal Styles */
+#details-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: var(--secondary-bg);
+    margin: 15% auto;
+    padding: 20px;
+    border-radius: var(--border-radius);
+    width: 80%;
+    max-width: 800px;
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.close-modal {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.close-modal:hover {
+    color: var(--accent);
+}
+
+.modal-content h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    padding-right: 40px;
+}
+
+.modal-content pre {
+    background-color: var(--primary-bg);
+    border-radius: var(--border-radius);
+    padding: 16px;
+    margin: 0;
+    overflow: auto;
+    max-height: 60vh;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Stats Cards */
+.stat-value {
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 1rem 0;
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Accounts and Regions */
+.region-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.region-list a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--light-purple);
+    border-radius: 4px;
+    font-size: 0.875rem;
+    color: var(--dark-purple);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.region-list a:hover {
+    background: var(--medium-purple);
+    color: white;
+}
+
+.filter-icon {
+    opacity: 0.6;
+    transition: var(--transition);
+}
+
+a:hover .filter-icon {
+    opacity: 1;
+}
+
+#accounts-regions td {
+    padding: 0.75rem;
+}
+
+#accounts-regions a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--dark-purple);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+#accounts-regions a:hover {
+    color: var(--medium-purple);
+}
+
+/* Export Button */
+.export-btn {
+    float: right;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: #3c349c;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.export-btn:hover {
+    background-color: #2d2875;
+}
+
+.export-btn svg {
+    stroke: currentColor;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .summary-block.wide,
+    .summary-block.chart {
+        flex: 1 1 100%;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 900px) {
+    .summary-block.compact {
+        flex: 1 1 100%;
+        max-width: 100%;
+    }
+
+    body {
+        padding: 1rem;
+    }
+
+    header {
+        margin: -1rem -1rem 1rem -1rem;
+        padding: 2rem 1rem;
+    }
+
+    .table-wrapper {
+        margin: 0 -0.5rem;
+        padding: 0 0.5rem;
+    }
+}
+
+@media (max-width: 600px) {
+    th, td {
+        padding: 0.75rem;
+        font-size: 0.9rem;
+    }
+
+    .input-container {
+        flex-direction: column;
+    }
+
+    #clear-search {
+        width: 100%;
+    }
+
+    .modal {
+        padding: 1rem;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+    }
+}
