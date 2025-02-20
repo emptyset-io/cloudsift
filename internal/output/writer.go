@@ -93,24 +93,25 @@ func (w *Writer) getAccountID(accountID string) string {
 }
 
 // getFilePath returns the file path in the format:
-// filesystem: output/YYYY/MM/DD/accountId.HH:MM:SS-07:00.json.gz
-// s3: YYYY/MM/DD/accountId.HH:MM:SS-07:00.json.gz
+// filesystem: output/YYYY/MM/DD/<accountId>/HH-MM-SS-0700.json.gz
+// s3: YYYY/MM/DD/<accountId>/HH-MM-SS-0700.json.gz
 func (w *Writer) getFilePath(accountID string, t time.Time) string {
 	// Extract just the numeric account ID
 	accountID = w.getAccountID(accountID)
 
-	fileName := fmt.Sprintf("%s.%s.json.gz",
-		accountID,
-		t.Format("20060102150405-07_00"),
-	)
-	fileName = strings.Replace(fileName, ":", "_", -1)
+	// Format the filename with account ID and timestamp
+	fileName := t.Format("15-04-05-0700") + ".json.gz"
 
+	// Format the date path as YYYY/MM/DD
 	datePath := t.Format("2006/01/02")
 
+	// Construct the path
 	if w.config.Type == FileSystem {
-		return filepath.Join(w.config.OutputDir, datePath, fileName)
+		// In filesystem, create the directory structure with account ID as a folder
+		return filepath.Join(w.config.OutputDir, datePath, accountID, fileName)
 	}
-	return filepath.Join(datePath, fileName)
+	// For S3, use the same structure without the base directory
+	return filepath.Join(datePath, accountID, fileName)
 }
 
 // compressData compresses the input data using gzip

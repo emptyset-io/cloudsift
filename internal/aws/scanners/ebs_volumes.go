@@ -5,12 +5,14 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
+	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/sts"
 )
 
-// EBSVolumeScanner scans for unused EBS volumes
+// EBSVolumeScanner scans for EBS volumes
 type EBSVolumeScanner struct{}
 
 func init() {
@@ -37,8 +39,20 @@ func (s *EBSVolumeScanner) Label() string {
 func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	sess, err := awslib.GetSession(opts.Region)
 	if err != nil {
+		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+			"region": opts.Region,
+		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
+
+	// Get current account ID
+	stsSvc := sts.New(sess)
+	identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		logging.Error("Failed to get caller identity", err, nil)
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+	accountID := aws.StringValue(identity.Account)
 
 	// Scan for volumes
 	svc := ec2.New(sess)
@@ -51,8 +65,13 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			age := time.Since(*volume.CreateTime)
 			ageInDays := int(age.Hours() / 24)
 
-			// Skip if volume is attached or not old enough
-			if len(volume.Attachments) > 0 || ageInDays < opts.DaysUnused {
+			// Skip if volume is not old enough
+			if ageInDays < opts.DaysUnused {
+				continue
+			}
+
+			// Skip if volume is attached
+			if len(volume.Attachments) > 0 {
 				continue
 			}
 
@@ -62,17 +81,21 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
 			}
 
-			// Get volume name from tags or use volume ID
-			volumeName := aws.StringValue(volume.VolumeId)
+			// Get resource name from tags or use volume ID
+			resourceName := aws.StringValue(volume.VolumeId)
 			if name, ok := tags["Name"]; ok {
-				volumeName = name
+				resourceName = name
 			}
 
 			// Calculate costs
 			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
 			if err != nil {
-				// Log error but continue without costs
-				fmt.Printf("Failed to create cost estimator: %v\n", err)
+				logging.Error("Failed to create cost estimator", err, map[string]interface{}{
+					"account_id":    accountID,
+					"region":        opts.Region,
+					"resource_name": resourceName,
+					"resource_id":   aws.StringValue(volume.VolumeId),
+				})
 			}
 
 			var costs *awslib.CostBreakdown
@@ -84,37 +107,47 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 					CreationTime: *volume.CreateTime,
 				})
 				if err != nil {
-					fmt.Printf("Failed to calculate costs for volume %s: %v\n", volumeName, err)
+					logging.Error("Failed to calculate costs", err, map[string]interface{}{
+						"account_id":    accountID,
+						"region":        opts.Region,
+						"resource_name": resourceName,
+						"resource_id":   aws.StringValue(volume.VolumeId),
+						"resource_type": "EBSVolumes",
+					})
 				}
 			}
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"volume_id":    aws.StringValue(volume.VolumeId),
-				"state":        aws.StringValue(volume.State),
-				"create_time":  volume.CreateTime.Format("2006-01-02T15:04:05Z07:00"),
-				"age_days":     ageInDays,
-				"size":         aws.Int64Value(volume.Size),
-				"volume_type":  aws.StringValue(volume.VolumeType),
-				"encrypted":    aws.BoolValue(volume.Encrypted),
-				"iops":         aws.Int64Value(volume.Iops),
-				"kms_key_id":   aws.StringValue(volume.KmsKeyId),
-				"snapshot_id":  aws.StringValue(volume.SnapshotId),
-				"availability_zone": aws.StringValue(volume.AvailabilityZone),
-				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
+				"volume_id":   aws.StringValue(volume.VolumeId),
+				"state":       aws.StringValue(volume.State),
+				"create_time": volume.CreateTime.Format("2006-01-02T15:04:05Z07:00"),
+				"age_days":    ageInDays,
+				"size":        aws.Int64Value(volume.Size),
+				"encrypted":   aws.BoolValue(volume.Encrypted),
+				"type":        aws.StringValue(volume.VolumeType),
+				"iops":        aws.Int64Value(volume.Iops),
+				"kms_key_id":  aws.StringValue(volume.KmsKeyId),
 			}
 
 			if costs != nil {
 				details["costs"] = costs
 			}
 
+			// Log that we found a result
+			logging.Debug("Found unused EBS volume", map[string]interface{}{
+				"account_id":    accountID,
+				"region":        opts.Region,
+				"resource_name": resourceName,
+				"resource_id":   aws.StringValue(volume.VolumeId),
+			})
+
 			results = append(results, awslib.ScanResult{
 				ResourceType: s.Label(),
-				ResourceName: volumeName,
+				ResourceName: resourceName,
 				ResourceID:   aws.StringValue(volume.VolumeId),
-				Reason: fmt.Sprintf("%dGB volume created on %s, unused for %d days",
+				Reason: fmt.Sprintf("%dGB volume, unused for %d days",
 					aws.Int64Value(volume.Size),
-					volume.CreateTime.Format("2006-01-02"),
 					ageInDays),
 				Tags:    tags,
 				Details: details,
@@ -124,6 +157,10 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	})
 
 	if err != nil {
+		logging.Error("Failed to describe volumes", err, map[string]interface{}{
+			"account_id": accountID,
+			"region":    opts.Region,
+		})
 		return nil, fmt.Errorf("failed to describe volumes in %s: %w", opts.Region, err)
 	}
 

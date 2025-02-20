@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"cloudsift/internal/logging"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/pricing"
 )
@@ -29,6 +31,54 @@ type ResourceCostConfig struct {
 	CreationTime time.Time
 }
 
+// AWS region to location name mapping for pricing API
+var regionToLocation = map[string]string{
+	// US Regions
+	"us-east-1": "US East (N. Virginia)",
+	"us-east-2": "US East (Ohio)",
+	"us-west-1": "US West (N. California)",
+	"us-west-2": "US West (Oregon)",
+
+	// Canada
+	"ca-central-1": "Canada (Central)",
+
+	// South America
+	"sa-east-1": "South America (São Paulo)",
+
+	// Europe
+	"eu-central-1": "Europe (Frankfurt)",
+	"eu-central-2": "Europe (Zurich)",
+	"eu-west-1":    "Europe (Ireland)",
+	"eu-west-2":    "Europe (London)",
+	"eu-west-3":    "Europe (Paris)",
+	"eu-north-1":   "Europe (Stockholm)",
+	"eu-south-1":   "Europe (Milan)",
+	"eu-south-2":   "Europe (Spain)",
+
+	// Africa
+	"af-south-1": "Africa (Cape Town)",
+
+	// Middle East
+	"me-central-1": "Middle East (UAE)",
+	"me-south-1":   "Middle East (Bahrain)",
+
+	// Asia Pacific
+	"ap-east-1":      "Asia Pacific (Hong Kong)",
+	"ap-south-1":     "Asia Pacific (Mumbai)",
+	"ap-south-2":     "Asia Pacific (Hyderabad)",
+	"ap-southeast-1": "Asia Pacific (Singapore)",
+	"ap-southeast-2": "Asia Pacific (Sydney)",
+	"ap-southeast-3": "Asia Pacific (Jakarta)",
+	"ap-southeast-4": "Asia Pacific (Melbourne)",
+	"ap-northeast-1": "Asia Pacific (Tokyo)",
+	"ap-northeast-2": "Asia Pacific (Seoul)",
+	"ap-northeast-3": "Asia Pacific (Osaka)",
+
+	// China (requires separate AWS accounts)
+	"cn-north-1":     "China (Beijing)",
+	"cn-northwest-1": "China (Ningxia)",
+}
+
 // CostEstimator handles AWS resource cost calculations with caching
 type CostEstimator struct {
 	pricingClient *pricing.Pricing
@@ -47,11 +97,17 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 	// Ensure cache directory exists
 	cacheDir := filepath.Dir(cacheFile)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		logging.Error("Failed to create cache directory", err, map[string]interface{}{
+			"cache_dir": cacheDir,
+		})
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
 	sess, err := GetSession("us-east-1") // Pricing API is only available in us-east-1
 	if err != nil {
+		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+			"region": "us-east-1",
+		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
@@ -62,8 +118,15 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 	}
 
 	if err := ce.loadCache(); err != nil {
+		logging.Error("Failed to load cache", err, map[string]interface{}{
+			"cache_file": cacheFile,
+		})
 		return nil, fmt.Errorf("failed to load cache: %w", err)
 	}
+
+	logging.Info("Cost estimator initialized", map[string]interface{}{
+		"cache_file": cacheFile,
+	})
 
 	return ce, nil
 }
@@ -75,12 +138,30 @@ func (ce *CostEstimator) loadCache() error {
 	data, err := os.ReadFile(ce.cacheFile)
 	if err != nil {
 		if os.IsNotExist(err) {
+			logging.Debug("Cache file does not exist, starting with empty cache", map[string]interface{}{
+				"cache_file": ce.cacheFile,
+			})
 			return nil // Cache file doesn't exist yet
 		}
+		logging.Error("Failed to read cache file", err, map[string]interface{}{
+			"cache_file": ce.cacheFile,
+		})
 		return fmt.Errorf("failed to read cache file: %w", err)
 	}
 
-	return json.Unmarshal(data, &ce.priceCache)
+	if err := json.Unmarshal(data, &ce.priceCache); err != nil {
+		logging.Error("Failed to unmarshal cache data", err, map[string]interface{}{
+			"cache_file": ce.cacheFile,
+		})
+		return fmt.Errorf("failed to unmarshal cache data: %w", err)
+	}
+
+	logging.Debug("Cache loaded successfully", map[string]interface{}{
+		"cache_file": ce.cacheFile,
+		"cache_size": len(ce.priceCache),
+	})
+
+	return nil
 }
 
 func (ce *CostEstimator) saveCache() error {
@@ -92,189 +173,238 @@ func (ce *CostEstimator) saveCache() error {
 	ce.cacheLock.RUnlock()
 
 	if err != nil {
+		logging.Error("Failed to marshal cache", err, map[string]interface{}{
+			"cache_file": ce.cacheFile,
+		})
 		return fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
-	return os.WriteFile(ce.cacheFile, data, 0644)
+	if err := os.WriteFile(ce.cacheFile, data, 0644); err != nil {
+		logging.Error("Failed to write cache file", err, map[string]interface{}{
+			"cache_file": ce.cacheFile,
+		})
+		return fmt.Errorf("failed to write cache file: %w", err)
+	}
+
+	logging.Debug("Cache saved successfully", map[string]interface{}{
+		"cache_file": ce.cacheFile,
+		"cache_size": len(ce.priceCache),
+	})
+
+	return nil
 }
 
-func (ce *CostEstimator) getAWSPrice(serviceCode string, filters map[string]string) (float64, error) {
-	// Create cache key from service code and filters
-	filterBytes, _ := json.Marshal(filters)
-	cacheKey := fmt.Sprintf("%s_%s", serviceCode, string(filterBytes))
+func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, error) {
+	// Get location name for the region
+	location, ok := regionToLocation[region]
+	if !ok {
+		return 0, fmt.Errorf("unsupported region: %s", region)
+	}
+
+	// Create cache key
+	cacheKey := fmt.Sprintf("%s_%s", resourceType, region)
 
 	// Check cache first
 	ce.cacheLock.RLock()
 	if price, ok := ce.priceCache[cacheKey]; ok {
 		ce.cacheLock.RUnlock()
+		logging.Debug("Price found in cache", map[string]interface{}{
+			"resource_type": resourceType,
+			"region":        region,
+			"price":         price,
+		})
 		return price, nil
 	}
 	ce.cacheLock.RUnlock()
 
-	// Convert filters to AWS format
-	awsFilters := make([]*pricing.Filter, 0, len(filters))
-	for k, v := range filters {
-		awsFilters = append(awsFilters, &pricing.Filter{
-			Type:  aws.String("TERM_MATCH"),
-			Field: aws.String(k),
-			Value: aws.String(v),
-		})
+	logging.Debug("Price not found in cache, fetching from AWS", map[string]interface{}{
+		"resource_type": resourceType,
+		"region":        region,
+	})
+
+	var filters []*pricing.Filter
+	switch resourceType {
+	case "EBSVolumes":
+		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("productFamily"),
+				Value: aws.String("Storage"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("volumeType"),
+				Value: aws.String("General Purpose"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+		}
+	case "EBSSnapshots":
+		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("productFamily"),
+				Value: aws.String("Storage Snapshot"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+		}
+	default:
+		return 0, fmt.Errorf("unsupported resource type: %s", resourceType)
 	}
 
 	input := &pricing.GetProductsInput{
-		ServiceCode: aws.String(serviceCode),
-		Filters:     awsFilters,
+		ServiceCode: aws.String("AmazonEC2"),
+		Filters:     filters,
 	}
 
 	result, err := ce.pricingClient.GetProducts(input)
 	if err != nil {
+		logging.Error("Failed to get pricing from AWS", err, map[string]interface{}{
+			"resource_type": resourceType,
+			"region":        region,
+		})
 		return 0, fmt.Errorf("failed to get pricing: %w", err)
 	}
 
 	if len(result.PriceList) == 0 {
+		logging.Error("No pricing information found", fmt.Errorf("no pricing data"), map[string]interface{}{
+			"resource_type": resourceType,
+			"region":        region,
+		})
 		return 0, fmt.Errorf("no pricing information found")
 	}
 
-	// Marshal and unmarshal to handle AWS JSONValue type
-	jsonBytes, err := json.Marshal(result.PriceList[0])
-	if err != nil {
-		return 0, fmt.Errorf("failed to marshal pricing data: %w", err)
-	}
+	// Parse the price from the response
+	var priceFloat float64
+	for _, priceData := range result.PriceList {
+		// Convert to JSON for easier parsing
+		jsonBytes, err := json.Marshal(priceData)
+		if err != nil {
+			continue
+		}
 
-	var jsonData map[string]interface{}
-	if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
-		return 0, fmt.Errorf("failed to unmarshal pricing data: %w", err)
-	}
+		var data map[string]interface{}
+		if err := json.Unmarshal(jsonBytes, &data); err != nil {
+			continue
+		}
 
-	terms, ok := jsonData["terms"].(map[string]interface{})
-	if !ok {
-		return 0, fmt.Errorf("invalid terms format in pricing data")
-	}
-
-	onDemand, ok := terms["OnDemand"].(map[string]interface{})
-	if !ok {
-		return 0, fmt.Errorf("invalid OnDemand format in pricing data")
-	}
-
-	for _, term := range onDemand {
-		termData, ok := term.(map[string]interface{})
+		terms, ok := data["terms"].(map[string]interface{})
 		if !ok {
 			continue
 		}
 
-		priceDimensions, ok := termData["priceDimensions"].(map[string]interface{})
+		onDemand, ok := terms["OnDemand"].(map[string]interface{})
 		if !ok {
 			continue
 		}
 
-		for _, dimension := range priceDimensions {
-			dimData, ok := dimension.(map[string]interface{})
+		// Get the first price dimension
+		for _, term := range onDemand {
+			termData, ok := term.(map[string]interface{})
 			if !ok {
 				continue
 			}
 
-			pricePerUnit, ok := dimData["pricePerUnit"].(map[string]interface{})
+			priceDimensions, ok := termData["priceDimensions"].(map[string]interface{})
 			if !ok {
 				continue
 			}
 
-			priceStr, ok := pricePerUnit["USD"].(string)
-			if !ok {
-				continue
+			for _, dimension := range priceDimensions {
+				dimData, ok := dimension.(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				pricePerUnit, ok := dimData["pricePerUnit"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+
+				priceStr, ok := pricePerUnit["USD"].(string)
+				if !ok {
+					continue
+				}
+
+				if _, err := fmt.Sscanf(priceStr, "%f", &priceFloat); err != nil {
+					continue
+				}
+
+				// Cache the price
+				ce.cacheLock.Lock()
+				ce.priceCache[cacheKey] = priceFloat
+				ce.cacheLock.Unlock()
+
+				if err := ce.saveCache(); err != nil {
+					logging.Error("Failed to save cache", err, map[string]interface{}{
+						"cache_file": ce.cacheFile,
+					})
+				}
+
+				logging.Debug("Price fetched and cached successfully", map[string]interface{}{
+					"resource_type": resourceType,
+					"region":        region,
+					"price":         priceFloat,
+				})
+
+				return priceFloat, nil
 			}
-
-			var priceFloat float64
-			if _, err := fmt.Sscanf(priceStr, "%f", &priceFloat); err != nil {
-				continue
-			}
-
-			// Cache the price
-			ce.cacheLock.Lock()
-			ce.priceCache[cacheKey] = priceFloat
-			ce.cacheLock.Unlock()
-
-			if err := ce.saveCache(); err != nil {
-				// Log error but continue
-				fmt.Printf("Failed to save cache: %v\n", err)
-			}
-
-			return priceFloat, nil
 		}
 	}
 
-	return 0, fmt.Errorf("could not find price in response")
+	return 0, fmt.Errorf("could not find valid price in response")
 }
 
 // CalculateCost calculates the cost for a given resource
 func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdown, error) {
-	// Service code and filter mappings
-	serviceCodeMap := map[string]string{
-		"EBSVolumes":    "AmazonEC2",
-		"EC2Instances":  "AmazonEC2",
-		"EBSSnapshots":  "AmazonEC2",
-		"RDSInstances":  "AmazonRDS",
-		"DynamoDB":      "AmazonDynamoDB",
-		"ElasticIPs":    "AmazonEC2",
-		"LoadBalancers": "ElasticLoadBalancing",
-		"EKSCluster":    "AmazonEKS",
-	}
+	logging.Debug("Calculating resource cost", map[string]interface{}{
+		"resource_type": config.ResourceType,
+		"resource_size": config.ResourceSize,
+		"region":        config.Region,
+		"creation_time": config.CreationTime.Format(time.RFC3339),
+	})
 
-	// Get service code
-	serviceCode, ok := serviceCodeMap[config.ResourceType]
-	if !ok {
-		return nil, fmt.Errorf("unsupported resource type: %s", config.ResourceType)
-	}
-
-	// Build filters based on resource type
-	filters := map[string]string{
-		"location": config.Region,
-	}
-
-	switch config.ResourceType {
-	case "EBSVolumes":
-		filters["productFamily"] = "Storage"
-		filters["volumeType"] = "General Purpose"
-	case "EBSSnapshots":
-		filters["productFamily"] = "Storage Snapshot"
-	case "EC2Instances":
-		filters["productFamily"] = "Compute Instance"
-		filters["instanceType"] = fmt.Sprintf("%d", config.ResourceSize)
-		// Add more cases as needed
-	}
-
-	// Get price per unit
-	pricePerUnit, err := ce.getAWSPrice(serviceCode, filters)
+	// Get price from AWS Pricing API
+	pricePerGB, err := ce.getAWSPrice(config.ResourceType, config.Region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get price: %w", err)
+		logging.Error("Failed to get AWS price", err, map[string]interface{}{
+			"resource_type": config.ResourceType,
+			"region":        config.Region,
+		})
+		return nil, fmt.Errorf("failed to get AWS price: %w", err)
 	}
 
-	// Calculate running hours
-	hoursRunning := time.Since(config.CreationTime).Hours()
+	// Calculate total monthly price based on size
+	monthlyPrice := float64(config.ResourceSize) * pricePerGB
 
-	// Calculate costs
-	var hourly, daily, monthly, yearly, lifetime float64
+	// Calculate time periods
+	now := time.Now()
+	lifetime := now.Sub(config.CreationTime).Hours()
 
-	if config.ResourceType == "EBSVolumes" || config.ResourceType == "EBSSnapshots" {
-		// EBS volumes and snapshots are charged per GB-month
-		monthly = pricePerUnit * float64(config.ResourceSize)
-		hourly = monthly / 720 // Approximate hours in a month
-		daily = hourly * 24
-		yearly = monthly * 12
-		lifetime = monthly * (hoursRunning / 720)
-	} else {
-		// Other resources typically charged per hour
-		hourly = pricePerUnit
-		daily = hourly * 24
-		monthly = hourly * 720
-		yearly = monthly * 12
-		lifetime = hourly * hoursRunning
+	// Convert monthly price to other time periods
+	hourlyPrice := monthlyPrice / 730 // Average hours in a month
+	breakdown := &CostBreakdown{
+		Hourly:   hourlyPrice,
+		Daily:    hourlyPrice * 24,
+		Monthly:  monthlyPrice,
+		Yearly:   monthlyPrice * 12,
+		Lifetime: hourlyPrice * lifetime,
 	}
 
-	return &CostBreakdown{
-		Hourly:   hourly,
-		Daily:    daily,
-		Monthly:  monthly,
-		Yearly:   yearly,
-		Lifetime: lifetime,
-	}, nil
+	logging.Debug("Cost calculation completed", map[string]interface{}{
+		"resource_type": config.ResourceType,
+		"resource_size": config.ResourceSize,
+		"price_per_gb":  pricePerGB,
+		"monthly_price": monthlyPrice,
+		"breakdown":     breakdown,
+	})
+
+	return breakdown, nil
 }

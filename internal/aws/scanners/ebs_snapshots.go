@@ -5,9 +5,11 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
+	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/sts"
 )
 
 // EBSSnapshotScanner scans for EBS snapshots
@@ -37,8 +39,20 @@ func (s *EBSSnapshotScanner) Label() string {
 func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	sess, err := awslib.GetSession(opts.Region)
 	if err != nil {
+		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+			"region": opts.Region,
+		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
+
+	// Get current account ID
+	stsSvc := sts.New(sess)
+	identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		logging.Error("Failed to get caller identity", err, nil)
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+	accountID := aws.StringValue(identity.Account)
 
 	// Scan for snapshots
 	svc := ec2.New(sess)
@@ -64,11 +78,24 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
 			}
 
+			// Get resource name from tags or use description/snapshot ID
+			resourceName := aws.StringValue(snapshot.Description)
+			if resourceName == "" {
+				resourceName = aws.StringValue(snapshot.SnapshotId)
+			}
+			if name, ok := tags["Name"]; ok {
+				resourceName = name
+			}
+
 			// Calculate costs
 			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
 			if err != nil {
-				// Log error but continue without costs
-				fmt.Printf("Failed to create cost estimator: %v\n", err)
+				logging.Error("Failed to create cost estimator", err, map[string]interface{}{
+					"account_id":    accountID,
+					"region":        opts.Region,
+					"resource_name": resourceName,
+					"resource_id":   aws.StringValue(snapshot.SnapshotId),
+				})
 			}
 
 			var costs *awslib.CostBreakdown
@@ -80,7 +107,13 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					CreationTime: *snapshot.StartTime,
 				})
 				if err != nil {
-					fmt.Printf("Failed to calculate costs for snapshot %s: %v\n", aws.StringValue(snapshot.SnapshotId), err)
+					logging.Error("Failed to calculate costs", err, map[string]interface{}{
+						"account_id":    accountID,
+						"region":        opts.Region,
+						"resource_name": resourceName,
+						"resource_id":   aws.StringValue(snapshot.SnapshotId),
+						"resource_type": "EBSSnapshots",
+					})
 				}
 			}
 
@@ -96,7 +129,6 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				"description":            aws.StringValue(snapshot.Description),
 				"kms_key_id":             aws.StringValue(snapshot.KmsKeyId),
 				"data_encryption_key_id": aws.StringValue(snapshot.DataEncryptionKeyId),
-				"owner_id":               aws.StringValue(snapshot.OwnerId),
 				"progress":               aws.StringValue(snapshot.Progress),
 			}
 
@@ -104,9 +136,17 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				details["costs"] = costs
 			}
 
+			// Log that we found a result
+			logging.Debug("Found unused EBS snapshot", map[string]interface{}{
+				"account_id":    accountID,
+				"region":        opts.Region,
+				"resource_name": resourceName,
+				"resource_id":   aws.StringValue(snapshot.SnapshotId),
+			})
+
 			results = append(results, awslib.ScanResult{
 				ResourceType: s.Label(),
-				ResourceName: aws.StringValue(snapshot.Description),
+				ResourceName: resourceName,
 				ResourceID:   aws.StringValue(snapshot.SnapshotId),
 				Reason: fmt.Sprintf("%dGB snapshot from %s, unused for %d days",
 					aws.Int64Value(snapshot.VolumeSize),
@@ -120,6 +160,10 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	})
 
 	if err != nil {
+		logging.Error("Failed to describe snapshots", err, map[string]interface{}{
+			"account_id": accountID,
+			"region":    opts.Region,
+		})
 		return nil, fmt.Errorf("failed to describe snapshots in %s: %w", opts.Region, err)
 	}
 
