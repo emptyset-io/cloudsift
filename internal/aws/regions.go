@@ -13,11 +13,11 @@ import (
 func GetAvailableRegions(sess *session.Session) ([]string, error) {
 	// Start with us-east-1 to get the region list
 	svc := ec2.New(sess, aws.NewConfig().WithRegion("us-east-1"))
-	
+
 	input := &ec2.DescribeRegionsInput{
 		AllRegions: aws.Bool(false), // Only get enabled regions
 	}
-	
+
 	result, err := svc.DescribeRegions(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to describe regions: %w", err)
@@ -27,7 +27,7 @@ func GetAvailableRegions(sess *session.Session) ([]string, error) {
 	for _, region := range result.Regions {
 		regions = append(regions, aws.StringValue(region.RegionName))
 	}
-	
+
 	return regions, nil
 }
 
@@ -47,7 +47,7 @@ func ValidateRegions(sess *session.Session, requestedRegions []string) error {
 	// Check each requested region
 	for _, region := range requestedRegions {
 		if !regionMap[region] {
-			return fmt.Errorf("region '%s' is not available in this account. Available regions: %s", 
+			return fmt.Errorf("region '%s' is not available in this account. Available regions: %s",
 				region, strings.Join(availableRegions, ", "))
 		}
 	}

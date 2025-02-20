@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/spf13/cobra"
 	"cloudsift/cmd/list"
+	"github.com/spf13/cobra"
 )
 
 // NewListCmd creates and returns the list command

@@ -101,8 +101,8 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType:  "EBSVolumes",
-					ResourceSize:  aws.Int64Value(volume.Size),
+					ResourceType: "EBSVolumes",
+					ResourceSize: aws.Int64Value(volume.Size),
 					Region:       opts.Region,
 					CreationTime: *volume.CreateTime,
 				})
@@ -159,7 +159,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	if err != nil {
 		logging.Error("Failed to describe volumes", err, map[string]interface{}{
 			"account_id": accountID,
-			"region":    opts.Region,
+			"region":     opts.Region,
 		})
 		return nil, fmt.Errorf("failed to describe volumes in %s: %w", opts.Region, err)
 	}

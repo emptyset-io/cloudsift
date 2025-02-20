@@ -7,21 +7,21 @@ import (
 
 // ScanOptions contains configuration for the scan operation
 type ScanOptions struct {
-	Region      string // AWS region to scan
-	DaysUnused  int    // Number of days a resource must be unused to be reported
+	Region     string // AWS region to scan
+	DaysUnused int    // Number of days a resource must be unused to be reported
 }
 
 // Scanner represents a resource scanner that can scan AWS resources
 type Scanner interface {
 	// Name returns the human-readable name of the scanner
 	Name() string
-	
+
 	// ArgumentName returns the command-line argument name for the scanner
 	ArgumentName() string
-	
+
 	// Label returns a unique label identifying the scanner
 	Label() string
-	
+
 	// Scan performs the actual scanning operation
 	// If region is empty, uses the default region from the session
 	Scan(opts ScanOptions) (ScanResults, error)

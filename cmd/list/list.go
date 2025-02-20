@@ -1,8 +1,8 @@
 package list
 
 import (
-	"github.com/spf13/cobra"
 	_ "cloudsift/internal/aws/scanners" // Import for side effects (scanner registration)
+	"github.com/spf13/cobra"
 )
 
 // NewListCmd creates the list command

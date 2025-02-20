@@ -14,11 +14,18 @@ ARCH := $(shell uname -m)
 
 # Install Go using g (Go Version Manager)
 install-go:
+	@echo "Checking for 'g' package manager..."
+	@if ! command -v g &> /dev/null; then \
+		echo "'g' is not installed. Installing now..."; \
+		curl -sSL https://git.io/g-install | bash; \
+		exec $$SHELL; \
+	fi
 	@echo "Installing Go $(GO_VERSION)..."
 	@g install $(GO_VERSION)
 	@g use $(GO_VERSION)
 	@g default $(GO_VERSION)
 	@echo "Go $(GO_VERSION) installed and set as default."
+
 
 # Install dependencies
 deps:
@@ -36,7 +43,11 @@ lint:
 	@echo "Running lint checks..."
 	@if ! command -v golangci-lint &> /dev/null; then \
 		echo "Installing golangci-lint..."; \
-		brew install golangci-lint; \
+		if [ "$(shell uname)" = "Darwin" ]; then \
+			brew install golangci-lint; \
+		else \
+			go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		fi \
 	fi
 	@golangci-lint run
 

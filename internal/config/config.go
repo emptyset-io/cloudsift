@@ -22,6 +22,6 @@ type GlobalConfig struct {
 
 // Config is the global configuration instance
 var Config = &GlobalConfig{
-	Profile:    "default",  // Default to "default" profile
+	Profile:    "default", // Default to "default" profile
 	MaxWorkers: runtime.NumCPU(),
 }

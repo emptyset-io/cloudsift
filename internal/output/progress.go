@@ -49,17 +49,17 @@ func (p *ProgressBar) Update(n int64) {
 func (p *ProgressBar) print() {
 	percent := float64(p.current) / float64(p.total)
 	filled := int(percent * float64(barWidth))
-	
+
 	// Create the bar
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	
+
 	// Calculate transfer speed
 	speed := float64(p.current) / time.Since(p.lastPrint).Seconds()
 	speedStr := formatBytes(int64(speed)) + "/s"
-	
+
 	// Format progress
 	progress := fmt.Sprintf("%s/%s", formatBytes(p.current), formatBytes(p.total))
-	
+
 	// Print the bar with colors
 	fmt.Printf("\r%s [%s] %3.0f%% %s %s",
 		color.BlueString("Uploading"),

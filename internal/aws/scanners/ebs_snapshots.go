@@ -101,8 +101,8 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType:  "EBSSnapshots",
-					ResourceSize:  aws.Int64Value(snapshot.VolumeSize),
+					ResourceType: "EBSSnapshots",
+					ResourceSize: aws.Int64Value(snapshot.VolumeSize),
 					Region:       opts.Region,
 					CreationTime: *snapshot.StartTime,
 				})
@@ -162,7 +162,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	if err != nil {
 		logging.Error("Failed to describe snapshots", err, map[string]interface{}{
 			"account_id": accountID,
-			"region":    opts.Region,
+			"region":     opts.Region,
 		})
 		return nil, fmt.Errorf("failed to describe snapshots in %s: %w", opts.Region, err)
 	}

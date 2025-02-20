@@ -16,13 +16,13 @@ import (
 )
 
 type scanOptions struct {
-	regions      string
-	scanners     string
-	format       string
-	output       string
-	bucket       string
-	outputDir    string
-	daysUnused   int // Number of days a resource must be unused to be reported
+	regions    string
+	scanners   string
+	format     string
+	output     string
+	bucket     string
+	outputDir  string
+	daysUnused int // Number of days a resource must be unused to be reported
 }
 
 // NewScanCmd creates the scan command

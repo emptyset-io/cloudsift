@@ -3,8 +3,8 @@ package list
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"cloudsift/internal/aws"
+	"github.com/spf13/cobra"
 )
 
 // NewProfilesCmd creates and returns the profiles command
