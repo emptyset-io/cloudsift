@@ -126,18 +126,46 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"volume_id":      aws.StringValue(volume.VolumeId),
-				"state":         aws.StringValue(volume.State),
-				"size":          aws.Int64Value(volume.Size),
-				"volume_type":   aws.StringValue(volume.VolumeType),
-				"iops":          aws.Int64Value(volume.Iops),
-				"encrypted":     aws.BoolValue(volume.Encrypted),
-				"hours_running": time.Since(*volume.CreateTime).Hours(),
-				"tags":          tags,
+				"volume_id":           aws.StringValue(volume.VolumeId),
+				"size":               aws.Int64Value(volume.Size),
+				"state":              aws.StringValue(volume.State),
+				"volume_type":        aws.StringValue(volume.VolumeType),
+				"iops":               aws.Int64Value(volume.Iops),
+				"throughput":         aws.Int64Value(volume.Throughput),
+				"encrypted":          aws.BoolValue(volume.Encrypted),
+				"kms_key_id":         aws.StringValue(volume.KmsKeyId),
+				"outpost_arn":        aws.StringValue(volume.OutpostArn),
+				"create_time":        volume.CreateTime.Format(time.RFC3339),
+				"hours_running":      time.Since(*volume.CreateTime).Hours(),
+				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
+				"fast_restored":       aws.BoolValue(volume.FastRestored),
+				"snapshot_id":         aws.StringValue(volume.SnapshotId),
+				"availability_zone":   aws.StringValue(volume.AvailabilityZone),
 			}
 
+			// Add attachments
+			var attachments []map[string]interface{}
+			for _, attachment := range volume.Attachments {
+				attachmentDetails := map[string]interface{}{
+					"attach_time":    aws.TimeValue(attachment.AttachTime).Format(time.RFC3339),
+					"device":         aws.StringValue(attachment.Device),
+					"instance_id":    aws.StringValue(attachment.InstanceId),
+					"state":          aws.StringValue(attachment.State),
+					"volume_id":      aws.StringValue(attachment.VolumeId),
+					"delete_on_termination": aws.BoolValue(attachment.DeleteOnTermination),
+				}
+				attachments = append(attachments, attachmentDetails)
+			}
+			if len(attachments) > 0 {
+				details["attachments"] = attachments
+			}
+
+			// Build cost details
+			var costDetails map[string]interface{}
 			if costs != nil {
-				details["costs"] = costs
+				costDetails = map[string]interface{}{
+					"total": costs,
+				}
 			}
 
 			// Log that we found a result
@@ -157,6 +185,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 					ageInDays),
 				Tags:    tags,
 				Details: details,
+				Cost:    costDetails,
 			})
 		}
 		return !lastPage

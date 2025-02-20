@@ -140,17 +140,36 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"snapshot_id":    aws.StringValue(snapshot.SnapshotId),
-				"volume_id":      aws.StringValue(snapshot.VolumeId),
-				"state":         aws.StringValue(snapshot.State),
-				"size":          aws.Int64Value(snapshot.VolumeSize),
-				"encrypted":     aws.BoolValue(snapshot.Encrypted),
-				"hours_running": time.Since(*snapshot.StartTime).Hours(),
-				"tags":          tags,
+				"snapshot_id":          aws.StringValue(snapshot.SnapshotId),
+				"volume_id":           aws.StringValue(snapshot.VolumeId),
+				"state":               aws.StringValue(snapshot.State),
+				"state_message":       aws.StringValue(snapshot.StateMessage),
+				"start_time":          snapshot.StartTime.Format(time.RFC3339),
+				"progress":            aws.StringValue(snapshot.Progress),
+				"owner_id":            aws.StringValue(snapshot.OwnerId),
+				"description":         aws.StringValue(snapshot.Description),
+				"volume_size":         aws.Int64Value(snapshot.VolumeSize),
+				"owner_alias":         aws.StringValue(snapshot.OwnerAlias),
+				"encrypted":           aws.BoolValue(snapshot.Encrypted),
+				"kms_key_id":          aws.StringValue(snapshot.KmsKeyId),
+				"data_encryption_key_id": aws.StringValue(snapshot.DataEncryptionKeyId),
+				"hours_running":        time.Since(*snapshot.StartTime).Hours(),
+				"volume_type":          volumeType,
 			}
 
+			// Add storage tier info if available
+			if snapshot.StorageTier != nil {
+				details["storage_tier"] = map[string]interface{}{
+					"tier": aws.StringValue(snapshot.StorageTier),
+				}
+			}
+
+			// Build cost details
+			var costDetails map[string]interface{}
 			if costs != nil {
-				details["costs"] = costs
+				costDetails = map[string]interface{}{
+					"total": costs,
+				}
 			}
 
 			// Log that we found a result
@@ -171,6 +190,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					ageInDays),
 				Tags:    tags,
 				Details: details,
+				Cost:    costDetails,
 			})
 		}
 		return !lastPage

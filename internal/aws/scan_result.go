@@ -8,6 +8,7 @@ type ScanResult struct {
 	Reason       string                 `json:"reason"`
 	Tags         map[string]string      `json:"tags"`
 	Details      map[string]interface{} `json:"details"`
+	Cost         map[string]interface{} `json:"cost"`
 }
 
 // ScanResults is a slice of ScanResult

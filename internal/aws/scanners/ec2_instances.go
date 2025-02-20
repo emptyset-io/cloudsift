@@ -370,23 +370,145 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						}
 					}
 
-					// Build result details
+					// Build result details with all available attributes
 					details := map[string]interface{}{
-						"instance_id":   aws.StringValue(instance.InstanceId),
-						"state":        aws.StringValue(instance.State.Name),
-						"instance_type": aws.StringValue(instance.InstanceType),
-						"launch_time":   instance.LaunchTime.Format("2006-01-02T15:04:05Z"),
-						"hours_running": time.Since(*instance.LaunchTime).Hours(),
+						"architecture":          aws.StringValue(instance.Architecture),
+						"ami_id":               aws.StringValue(instance.ImageId),
+						"instance_id":          aws.StringValue(instance.InstanceId),
+						"instance_type":        aws.StringValue(instance.InstanceType),
+						"kernel_id":            aws.StringValue(instance.KernelId),
+						"key_name":             aws.StringValue(instance.KeyName),
+						"launch_time":          instance.LaunchTime.Format(time.RFC3339),
+						"platform":             aws.StringValue(instance.Platform),
+						"private_dns_name":     aws.StringValue(instance.PrivateDnsName),
+						"private_ip_address":   aws.StringValue(instance.PrivateIpAddress),
+						"public_dns_name":      aws.StringValue(instance.PublicDnsName),
+						"public_ip_address":    aws.StringValue(instance.PublicIpAddress),
+						"ramdisk_id":          aws.StringValue(instance.RamdiskId),
+						"root_device_name":     aws.StringValue(instance.RootDeviceName),
+						"root_device_type":     aws.StringValue(instance.RootDeviceType),
+						"source_dest_check":    aws.BoolValue(instance.SourceDestCheck),
+						"state":               aws.StringValue(instance.State.Name),
+						"state_code":          aws.Int64Value(instance.State.Code),
+						"state_reason":        aws.StringValue(instance.StateReason.Message),
+						"subnet_id":           aws.StringValue(instance.SubnetId),
+						"vpc_id":              aws.StringValue(instance.VpcId),
+						"hours_running":       time.Since(*instance.LaunchTime).Hours(),
+						"ebs_optimized":       aws.BoolValue(instance.EbsOptimized),
+						"ena_support":         aws.BoolValue(instance.EnaSupport),
+						"hypervisor":          aws.StringValue(instance.Hypervisor),
+						"virtualization_type": aws.StringValue(instance.VirtualizationType),
+						"monitoring_state":    aws.StringValue(instance.Monitoring.State),
+						"placement": map[string]interface{}{
+							"availability_zone": aws.StringValue(instance.Placement.AvailabilityZone),
+							"affinity":         aws.StringValue(instance.Placement.Affinity),
+							"group_name":       aws.StringValue(instance.Placement.GroupName),
+							"host_id":          aws.StringValue(instance.Placement.HostId),
+							"tenancy":          aws.StringValue(instance.Placement.Tenancy),
+						},
 					}
+
+					// Add network interfaces
+					var networkInterfaces []map[string]interface{}
+					for _, ni := range instance.NetworkInterfaces {
+						niDetails := map[string]interface{}{
+							"network_interface_id": aws.StringValue(ni.NetworkInterfaceId),
+							"description":         aws.StringValue(ni.Description),
+							"status":             aws.StringValue(ni.Status),
+							"mac_address":        aws.StringValue(ni.MacAddress),
+							"private_ip_address": aws.StringValue(ni.PrivateIpAddress),
+							"private_dns_name":   aws.StringValue(ni.PrivateDnsName),
+							"source_dest_check":  aws.BoolValue(ni.SourceDestCheck),
+							"subnet_id":          aws.StringValue(ni.SubnetId),
+							"vpc_id":             aws.StringValue(ni.VpcId),
+						}
+						networkInterfaces = append(networkInterfaces, niDetails)
+					}
+					details["network_interfaces"] = networkInterfaces
+
+					// Add security groups
+					var securityGroups []map[string]interface{}
+					for _, sg := range instance.SecurityGroups {
+						sgDetails := map[string]interface{}{
+							"group_id":   aws.StringValue(sg.GroupId),
+							"group_name": aws.StringValue(sg.GroupName),
+						}
+						securityGroups = append(securityGroups, sgDetails)
+					}
+					details["security_groups"] = securityGroups
+
+					// Add block device mappings
+					var blockDevices []map[string]interface{}
+					for _, bd := range instance.BlockDeviceMappings {
+						bdDetails := map[string]interface{}{
+							"device_name": aws.StringValue(bd.DeviceName),
+						}
+						if bd.Ebs != nil {
+							bdDetails["ebs"] = map[string]interface{}{
+								"attach_time":          aws.TimeValue(bd.Ebs.AttachTime).Format(time.RFC3339),
+								"delete_on_termination": aws.BoolValue(bd.Ebs.DeleteOnTermination),
+								"status":               aws.StringValue(bd.Ebs.Status),
+								"volume_id":            aws.StringValue(bd.Ebs.VolumeId),
+							}
+						}
+						blockDevices = append(blockDevices, bdDetails)
+					}
+					details["block_device_mappings"] = blockDevices
 
 					if len(ebsDetails) > 0 {
 						details["ebs_volumes"] = ebsDetails
 					}
-					if ebsCosts != nil {
-						details["ebs_costs"] = ebsCosts
+
+					// Build cost details - only include instance costs if the instance is stopped
+					costs := map[string]interface{}{}
+					if instanceState == "stopped" && instanceCosts != nil {
+						costs["instance"] = instanceCosts
 					}
-					if totalCosts != nil {
-						details["total_costs"] = totalCosts
+					if ebsCosts != nil {
+						costs["ebs"] = ebsCosts
+					}
+					if len(costs) > 0 {
+						// Calculate total costs
+						totalCosts := &awslib.CostBreakdown{
+							HourlyRate:  0,
+							DailyRate:   0,
+							MonthlyRate: 0,
+							YearlyRate:  0,
+						}
+
+						if costs["instance"] != nil {
+							ic := costs["instance"].(*awslib.CostBreakdown)
+							totalCosts.HourlyRate += ic.HourlyRate
+							totalCosts.DailyRate += ic.DailyRate
+							totalCosts.MonthlyRate += ic.MonthlyRate
+							totalCosts.YearlyRate += ic.YearlyRate
+							if ic.Lifetime != nil {
+								if totalCosts.Lifetime == nil {
+									totalCosts.Lifetime = ic.Lifetime
+								} else {
+									lifetime := *totalCosts.Lifetime + *ic.Lifetime
+									totalCosts.Lifetime = &lifetime
+								}
+							}
+						}
+
+						if costs["ebs"] != nil {
+							ec := costs["ebs"].(*awslib.CostBreakdown)
+							totalCosts.HourlyRate += ec.HourlyRate
+							totalCosts.DailyRate += ec.DailyRate
+							totalCosts.MonthlyRate += ec.MonthlyRate
+							totalCosts.YearlyRate += ec.YearlyRate
+							if ec.Lifetime != nil {
+								if totalCosts.Lifetime == nil {
+									totalCosts.Lifetime = ec.Lifetime
+								} else {
+									lifetime := *totalCosts.Lifetime + *ec.Lifetime
+									totalCosts.Lifetime = &lifetime
+								}
+							}
+						}
+
+						costs["total"] = totalCosts
 					}
 
 					// Log that we found a result
@@ -401,9 +523,10 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						ResourceType: s.Label(),
 						ResourceName: resourceName,
 						ResourceID:   aws.StringValue(instance.InstanceId),
-						Reason:      strings.Join(reasons, ", "),
-						Tags:        tags,
-						Details:     details,
+						Reason:       strings.Join(reasons, ", "),
+						Tags:         tags,
+						Details:      details,
+						Cost:         costs,
 					})
 				}
 			}

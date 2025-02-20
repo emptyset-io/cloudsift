@@ -150,16 +150,30 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				result := awslib.ScanResult{
 					ResourceID:   allocationID,
 					ResourceName: resourceName,
+					ResourceType: s.Label(),
 					Details: map[string]interface{}{
-						"public_ip":     publicIP,
-						"allocation_id": allocationID,
-						"tags":          tags,
-						"reasons":       []string{"Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)"},
+						"allocation_id":     allocationID,
+						"public_ip":         aws.StringValue(addr.PublicIp),
+						"public_ipv4_pool": aws.StringValue(addr.PublicIpv4Pool),
+						"domain":           aws.StringValue(addr.Domain),
+						"instance_id":      aws.StringValue(addr.InstanceId),
+						"network_interface_id": aws.StringValue(addr.NetworkInterfaceId),
+						"network_interface_owner_id": aws.StringValue(addr.NetworkInterfaceOwnerId),
+						"private_ip_address": aws.StringValue(addr.PrivateIpAddress),
+						"carrier_ip":        aws.StringValue(addr.CarrierIp),
+						"customer_owned_ip": aws.StringValue(addr.CustomerOwnedIp),
+						"customer_owned_ipv4_pool": aws.StringValue(addr.CustomerOwnedIpv4Pool),
+						"network_border_group": aws.StringValue(addr.NetworkBorderGroup),
+						"association_id": aws.StringValue(addr.AssociationId),
+						"reasons": []string{"Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)"},
 					},
+					Tags: tags,
 				}
 
 				if costs != nil {
-					result.Details["costs"] = costs
+					result.Cost = map[string]interface{}{
+						"total": costs,
+					}
 				}
 
 				results = append(results, result)
