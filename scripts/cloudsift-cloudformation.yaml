@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Template to set up:
+  1. An organization role in the management account (with permissions to read organization details).
+  2. A scanner role for sub accounts (with ReadOnly permissions) that is assumable by the organization role.
+  3. An S3 bucket in the management account that is writable by the scanner role.
+
+Parameters:
+  OrganizationRole:
+    Type: String
+    Description: "Name for the IAM role in the management account that has permissions to read organization details."
+  ScannerRole:
+    Type: String
+    Description: "Name for the scanner role in sub accounts that should have ReadOnly permissions."
+  BucketName:
+    Type: String
+    Description: "Name of the S3 bucket to be created in the management account."
+  BucketRegion:
+    Type: String
+    Description: "Region for the S3 bucket (should match the stack's region)."
+
+Resources:
+  OrganizationIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref OrganizationRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            # Allows the account’s root to assume this role; adjust as needed.
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OrgReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - organizations:ListAccounts
+                  - organizations:DescribeOrganization
+                  - organizations:ListRoots
+                  - organizations:ListOrganizationalUnitsForParent
+                Resource: "*"
+
+  ScannerIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ScannerRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            # Allow the organization role (from the management account) to assume this role.
+            Principal:
+              AWS: !GetAtt OrganizationIAMRole.Arn
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowScannerRoleWriteAccess
+            Effect: Allow
+            Principal:
+              # This grants write permissions to any role with the name provided by the ScannerRole parameter.
+              AWS: !Sub "arn:aws:iam::*:role/${ScannerRole}"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub "arn:aws:s3:::${BucketName}/*"
+
+Outputs:
+  OrganizationRoleARN:
+    Description: "ARN of the organization role."
+    Value: !GetAtt OrganizationIAMRole.Arn
+  ScannerRoleARN:
+    Description: "ARN of the scanner role (when deployed in a sub account)."
+    Value: !GetAtt ScannerIAMRole.Arn
+  S3BucketName:
+    Description: "Name of the created S3 bucket."
+    Value: !Ref S3Bucket
+

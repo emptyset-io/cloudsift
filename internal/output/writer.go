@@ -51,6 +51,7 @@ const (
 type Config struct {
 	Type      Type
 	S3Bucket  string
+	S3Region  string
 	OutputDir string
 	Retry     *RetryConfig
 	Upload    *UploadConfig
@@ -200,8 +201,8 @@ func (w *Writer) writeToS3WithRetry(path string, data []byte) error {
 
 // writeToS3 writes data to an S3 bucket with progress tracking
 func (w *Writer) writeToS3(path string, data []byte) error {
-	// Get AWS session
-	sess, err := awsutil.GetSession("", w.config.Region)
+	// Get AWS session with bucket region for S3 operations
+	sess, err := awsutil.GetSession("", w.config.S3Region)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}
@@ -222,9 +223,6 @@ func (w *Writer) writeToS3(path string, data []byte) error {
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(20),
 		progressbar.OptionShowCount(),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Printf("\nSuccessfully uploaded %s\n", path)
-		}),
 	)
 
 	// Create a wrapped reader that updates progress
@@ -246,6 +244,7 @@ func (w *Writer) writeToS3(path string, data []byte) error {
 	}
 
 	bar.Finish()
+	fmt.Printf("\nSuccessfully uploaded %s\n", path)
 	return nil
 }
 

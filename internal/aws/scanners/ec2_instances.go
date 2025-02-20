@@ -272,8 +272,9 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					var ebsCosts *awslib.CostBreakdown
 					var totalCosts *awslib.CostBreakdown
 
-					// Only calculate instance costs if the instance is running
-					if aws.StringValue(instance.State.Name) == "running" && costEstimator != nil {
+					if costEstimator != nil {
+						// Calculate instance costs
+						hoursRunning := time.Since(*instance.LaunchTime).Hours()
 						instanceCosts, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
 							ResourceType:  "EC2",
 							ResourceSize: aws.StringValue(instance.InstanceType),
@@ -287,76 +288,99 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 								"resource_name": resourceName,
 								"resource_id":   aws.StringValue(instance.InstanceId),
 							})
+						} else if instanceCosts != nil {
+							// Calculate lifetime cost for the instance
+							lifetime := roundCost(instanceCosts.HourlyRate * hoursRunning)
+							instanceCosts.Lifetime = &lifetime
+							instanceCosts.HoursRunning = &hoursRunning
 						}
-					}
 
-					// Calculate EBS volume costs
-					if len(ebsDetails) > 0 && costEstimator != nil {
-						ebsCosts = &awslib.CostBreakdown{}
-						for _, ebs := range ebsDetails {
-							volumeSize := ebs["SizeGB"].(int64)
-							volumeType := ebs["VolumeType"].(string)
-							volumeCost, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-								ResourceType:  "EBSVolumes",
-								ResourceSize: volumeSize,
-								Region:       opts.Region,
-								CreationTime: *instance.LaunchTime,
-								VolumeType:   volumeType,
-							})
-							if err != nil {
-								logging.Error("Failed to calculate EBS costs", err, map[string]interface{}{
-									"account_id":    accountID,
-									"region":        opts.Region,
-									"resource_name": resourceName,
-									"resource_id":   aws.StringValue(instance.InstanceId),
-									"volume_size":   volumeSize,
+						// Calculate EBS volume costs
+						if len(ebsDetails) > 0 {
+							ebsCosts = &awslib.CostBreakdown{}
+							for _, ebs := range ebsDetails {
+								volumeSize := ebs["SizeGB"].(int64)
+								volumeType := ebs["VolumeType"].(string)
+								hoursRunning := ebs["HoursRunning"].(float64)
+
+								volumeCost, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
+									ResourceType:  "EBSVolumes",
+									ResourceSize: volumeSize,
+									Region:       opts.Region,
+									CreationTime: time.Now().Add(-time.Duration(hoursRunning) * time.Hour),
+									VolumeType:   volumeType,
 								})
-								continue
-							}
-							// Add this volume's costs to total EBS costs
-							ebsCosts.Hourly += volumeCost.Hourly
-							ebsCosts.Daily += volumeCost.Daily
-							ebsCosts.Monthly += volumeCost.Monthly
-							ebsCosts.Yearly += volumeCost.Yearly
-							ebsCosts.Lifetime += volumeCost.Lifetime
-						}
-					}
+								if err != nil {
+									logging.Error("Failed to calculate EBS costs", err, map[string]interface{}{
+										"account_id":    accountID,
+										"region":        opts.Region,
+										"resource_name": resourceName,
+										"resource_id":   aws.StringValue(instance.InstanceId),
+									})
+									continue
+								}
 
-					// Calculate total costs
-					if instanceCosts != nil || ebsCosts != nil {
+								// Calculate lifetime cost for this volume
+								lifetime := roundCost(volumeCost.HourlyRate * hoursRunning)
+								volumeCost.Lifetime = &lifetime
+								volumeCost.HoursRunning = &hoursRunning
+
+								if ebsCosts == nil {
+									ebsCosts = volumeCost
+								} else {
+									ebsCosts.HourlyRate += volumeCost.HourlyRate
+									ebsCosts.DailyRate += volumeCost.DailyRate
+									ebsCosts.MonthlyRate += volumeCost.MonthlyRate
+									ebsCosts.YearlyRate += volumeCost.YearlyRate
+									if volumeCost.Lifetime != nil {
+										if ebsCosts.Lifetime == nil {
+											ebsCosts.Lifetime = volumeCost.Lifetime
+										} else {
+											lifetime := *ebsCosts.Lifetime + *volumeCost.Lifetime
+											ebsCosts.Lifetime = &lifetime
+										}
+									}
+								}
+							}
+						}
+
+						// Calculate total costs by combining instance and EBS costs
 						totalCosts = &awslib.CostBreakdown{}
 						if instanceCosts != nil {
-							totalCosts.Hourly += instanceCosts.Hourly
-							totalCosts.Daily += instanceCosts.Daily
-							totalCosts.Monthly += instanceCosts.Monthly
-							totalCosts.Yearly += instanceCosts.Yearly
-							totalCosts.Lifetime += instanceCosts.Lifetime
+							totalCosts.HourlyRate = instanceCosts.HourlyRate
+							totalCosts.DailyRate = instanceCosts.DailyRate
+							totalCosts.MonthlyRate = instanceCosts.MonthlyRate
+							totalCosts.YearlyRate = instanceCosts.YearlyRate
+							totalCosts.Lifetime = instanceCosts.Lifetime
+							totalCosts.HoursRunning = instanceCosts.HoursRunning
 						}
 						if ebsCosts != nil {
-							totalCosts.Hourly += ebsCosts.Hourly
-							totalCosts.Daily += ebsCosts.Daily
-							totalCosts.Monthly += ebsCosts.Monthly
-							totalCosts.Yearly += ebsCosts.Yearly
-							totalCosts.Lifetime += ebsCosts.Lifetime
+							totalCosts.HourlyRate += ebsCosts.HourlyRate
+							totalCosts.DailyRate += ebsCosts.DailyRate
+							totalCosts.MonthlyRate += ebsCosts.MonthlyRate
+							totalCosts.YearlyRate += ebsCosts.YearlyRate
+							if ebsCosts.Lifetime != nil {
+								if totalCosts.Lifetime == nil {
+									totalCosts.Lifetime = ebsCosts.Lifetime
+								} else {
+									lifetime := *totalCosts.Lifetime + *ebsCosts.Lifetime
+									totalCosts.Lifetime = &lifetime
+								}
+							}
 						}
 					}
 
-					// Collect all relevant details
+					// Build result details
 					details := map[string]interface{}{
 						"instance_id":   aws.StringValue(instance.InstanceId),
+						"state":        aws.StringValue(instance.State.Name),
 						"instance_type": aws.StringValue(instance.InstanceType),
-						"state":         aws.StringValue(instance.State.Name),
-						"launch_time":   instance.LaunchTime.Format("2006-01-02T15:04:05Z07:00"),
-						"age_days":      ageInDays,
-						"hours_running": math.Round(hoursRunning*100) / 100,
+						"launch_time":   instance.LaunchTime.Format("2006-01-02T15:04:05Z"),
+						"hours_running": time.Since(*instance.LaunchTime).Hours(),
 					}
 
 					if len(ebsDetails) > 0 {
 						details["ebs_volumes"] = ebsDetails
-					}
-
-					if instanceCosts != nil {
-						details["instance_costs"] = instanceCosts
 					}
 					if ebsCosts != nil {
 						details["ebs_costs"] = ebsCosts
@@ -392,4 +416,8 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	}
 
 	return results, nil
+}
+
+func roundCost(cost float64) float64 {
+	return math.Round(cost*100) / 100
 }

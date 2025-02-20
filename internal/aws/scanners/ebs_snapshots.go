@@ -107,27 +107,13 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			// Calculate costs
 			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
 			if err != nil {
-				logging.Error("Failed to create cost estimator", err, map[string]interface{}{
-					"account_id":    accountID,
-					"region":        opts.Region,
-					"resource_name": resourceName,
-					"resource_id":   aws.StringValue(snapshot.SnapshotId),
-				})
+				logging.Error("Failed to create cost estimator", err, nil)
 			}
 
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
 				snapshotSize := aws.Int64Value(snapshot.VolumeSize)
-
-				logging.Debug("Calculating snapshot costs", map[string]interface{}{
-					"account_id":    accountID,
-					"region":        opts.Region,
-					"resource_name": resourceName,
-					"resource_id":   aws.StringValue(snapshot.SnapshotId),
-					"snapshot_size": snapshotSize,
-					"volume_type":   volumeType,
-					"volume_id":     aws.StringValue(snapshot.VolumeId),
-				})
+				hoursRunning := time.Since(*snapshot.StartTime).Hours()
 
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
 					ResourceType:  "EBSSnapshots",
@@ -142,23 +128,25 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						"region":        opts.Region,
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(snapshot.SnapshotId),
-						"resource_type": "EBSSnapshots",
-						"volume_type":   volumeType,
 					})
+				}
+
+				// Calculate lifetime cost
+				if costs != nil {
+					lifetime := roundCost(costs.HourlyRate * hoursRunning)
+					costs.Lifetime = &lifetime
 				}
 			}
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"snapshot_id":   aws.StringValue(snapshot.SnapshotId),
-				"volume_id":     aws.StringValue(snapshot.VolumeId),
+				"snapshot_id":    aws.StringValue(snapshot.SnapshotId),
+				"volume_id":      aws.StringValue(snapshot.VolumeId),
 				"state":         aws.StringValue(snapshot.State),
-				"start_time":    snapshot.StartTime.Format("2006-01-02T15:04:05Z07:00"),
-				"age_days":      ageInDays,
-				"volume_size":   aws.Int64Value(snapshot.VolumeSize),
+				"size":          aws.Int64Value(snapshot.VolumeSize),
 				"encrypted":     aws.BoolValue(snapshot.Encrypted),
-				"description":   aws.StringValue(snapshot.Description),
-				"volume_type":   volumeType,
+				"hours_running": time.Since(*snapshot.StartTime).Hours(),
+				"tags":          tags,
 			}
 
 			if costs != nil {

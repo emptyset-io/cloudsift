@@ -92,30 +92,14 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			// Calculate costs
 			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
 			if err != nil {
-				logging.Error("Failed to create cost estimator", err, map[string]interface{}{
-					"account_id":    accountID,
-					"region":        opts.Region,
-					"resource_name": resourceName,
-					"resource_id":   aws.StringValue(volume.VolumeId),
-				})
+				logging.Error("Failed to create cost estimator", err, nil)
 			}
 
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
 				volumeSize := aws.Int64Value(volume.Size)
 				volumeType := aws.StringValue(volume.VolumeType)
-				if volumeType == "" {
-					volumeType = "gp2" // Default to gp2 if not specified
-				}
-
-				logging.Debug("Calculating volume costs", map[string]interface{}{
-					"account_id":    accountID,
-					"region":        opts.Region,
-					"resource_name": resourceName,
-					"resource_id":   aws.StringValue(volume.VolumeId),
-					"volume_size":   volumeSize,
-					"volume_type":   volumeType,
-				})
+				hoursRunning := time.Since(*volume.CreateTime).Hours()
 
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
 					ResourceType:  "EBSVolumes",
@@ -130,22 +114,26 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 						"region":        opts.Region,
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(volume.VolumeId),
-						"resource_type": "EBSVolumes",
 					})
+				}
+
+				// Calculate lifetime cost
+				if costs != nil {
+					lifetime := roundCost(costs.HourlyRate * hoursRunning)
+					costs.Lifetime = &lifetime
 				}
 			}
 
 			// Collect all relevant details
 			details := map[string]interface{}{
-				"volume_id":   aws.StringValue(volume.VolumeId),
-				"state":       aws.StringValue(volume.State),
-				"create_time": volume.CreateTime.Format("2006-01-02T15:04:05Z07:00"),
-				"age_days":    ageInDays,
-				"size":        aws.Int64Value(volume.Size),
-				"encrypted":   aws.BoolValue(volume.Encrypted),
-				"type":        aws.StringValue(volume.VolumeType),
-				"iops":        aws.Int64Value(volume.Iops),
-				"kms_key_id":  aws.StringValue(volume.KmsKeyId),
+				"volume_id":      aws.StringValue(volume.VolumeId),
+				"state":         aws.StringValue(volume.State),
+				"size":          aws.Int64Value(volume.Size),
+				"volume_type":   aws.StringValue(volume.VolumeType),
+				"iops":          aws.Int64Value(volume.Iops),
+				"encrypted":     aws.BoolValue(volume.Encrypted),
+				"hours_running": time.Since(*volume.CreateTime).Hours(),
+				"tags":          tags,
 			}
 
 			if costs != nil {

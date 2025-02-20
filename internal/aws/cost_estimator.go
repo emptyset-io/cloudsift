@@ -3,6 +3,7 @@ package aws
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,11 +19,12 @@ import (
 
 // CostBreakdown represents the cost of a resource over different time periods
 type CostBreakdown struct {
-	Hourly   float64 `json:"hourly"`
-	Daily    float64 `json:"daily"`
-	Monthly  float64 `json:"monthly"`
-	Yearly   float64 `json:"yearly"`
-	Lifetime float64 `json:"lifetime"`
+	HourlyRate   float64  `json:"hourly_rate"`
+	DailyRate    float64  `json:"daily_rate"`
+	MonthlyRate  float64  `json:"monthly_rate"`
+	YearlyRate   float64  `json:"yearly_rate"`
+	HoursRunning *float64 `json:"hours_running,omitempty"`
+	Lifetime     *float64 `json:"lifetime,omitempty"`
 }
 
 // ResourceCostConfig holds configuration for resource cost calculation
@@ -244,6 +246,14 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			"volume_type":   config.VolumeType,
 			"cache_key":     cacheKey,
 		})
+	case "ElasticIP":
+		// Elastic IPs have a flat rate of $0.005 per hour when not attached
+		hourlyRate := roundCost(0.005) // $0.005 per hour
+		return hourlyRate, nil
+	case "RDS":
+		// RDS has a flat rate of $0.005 per hour when not attached
+		hourlyRate := 0.005 // $0.005 per hour
+		return hourlyRate, nil
 	default:
 		cacheKey = fmt.Sprintf("%s_%s", resourceType, region)
 	}
@@ -321,7 +331,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 	case "EBSVolumes":
 		_, ok := config.ResourceSize.(int64)
 		if !ok {
-			return 0, fmt.Errorf("invalid resource size type for EBSVolumes: %T", config.ResourceSize)
+			return 0, fmt.Errorf("invalid resource size type for %s: %T", resourceType, config.ResourceSize)
 		}
 		filters = []*pricing.Filter{
 			{
@@ -348,10 +358,10 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 	case "EBSSnapshots":
 		_, ok := config.ResourceSize.(int64)
 		if !ok {
-			return 0, fmt.Errorf("invalid resource size type for EBSSnapshots: %T", config.ResourceSize)
+			return 0, fmt.Errorf("invalid resource size type for %s: %T", resourceType, config.ResourceSize)
 		}
 		if config.VolumeType == "" {
-			return 0, fmt.Errorf("volume type is required for EBSSnapshots")
+			return 0, fmt.Errorf("volume type is required for %s", resourceType)
 		}
 
 		filters = []*pricing.Filter{
@@ -506,6 +516,11 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 	return 0, fmt.Errorf("could not find valid price in response")
 }
 
+// roundCost rounds a cost value to 4 decimal places
+func roundCost(cost float64) float64 {
+	return math.Round(cost*10000) / 10000
+}
+
 // CalculateCost calculates the cost for a given resource
 func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdown, error) {
 	logging.Debug("Calculating cost", map[string]interface{}{
@@ -523,39 +538,69 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 		return nil, fmt.Errorf("failed to get AWS price: %w", err)
 	}
 
-	// Calculate total monthly price based on resource type
-	var monthlyPrice float64
+	// Calculate base price based on resource type
+	var hourlyPrice float64
 	switch config.ResourceType {
 	case "EC2":
-		// For EC2, price is already per hour, so just multiply by hours in a month
-		monthlyPrice = pricePerUnit * 730 // Average hours in a month (365.25 * 24 / 12)
+		// For EC2, price is already per hour
+		hourlyPrice = pricePerUnit
 	case "EBSVolumes", "EBSSnapshots":
-		// For storage resources, multiply by size (GB)
-		// pricePerUnit is already in GB-month, so just multiply by size
+		// For storage resources, we only care about size and rates
 		size, ok := config.ResourceSize.(int64)
 		if !ok {
 			return nil, fmt.Errorf("invalid resource size type for cost calculation: %T", config.ResourceSize)
 		}
-		monthlyPrice = float64(size) * pricePerUnit // Price per GB-month
+		monthlyPrice := float64(size) * pricePerUnit // Price per GB-month
+		hourlyPrice = monthlyPrice / 730 // Convert to hourly (730 hours in a month)
+		dailyPrice := hourlyPrice * 24
+		monthlyPrice = dailyPrice * 30  // Approximate
+		yearlyPrice := dailyPrice * 365
+
+		return &CostBreakdown{
+			HourlyRate:   roundCost(hourlyPrice),
+			DailyRate:    roundCost(dailyPrice),
+			MonthlyRate:  roundCost(monthlyPrice),
+			YearlyRate:   roundCost(yearlyPrice),
+			HoursRunning: nil, // Hours running should be stored in details
+			Lifetime:     nil, // Lifetime will be calculated by the application
+		}, nil
+	case "ElasticIP":
+		// Elastic IPs have a flat rate of $0.005 per hour when not attached
+		hourlyPrice = 0.005
+		dailyPrice := hourlyPrice * 24
+		monthlyPrice := dailyPrice * 30  // Approximate
+		yearlyPrice := dailyPrice * 365
+
+		// For Elastic IPs, we return immediately since we can't calculate lifetime
+		// (we don't know when it became unattached)
+		return &CostBreakdown{
+			HourlyRate:   roundCost(hourlyPrice),
+			DailyRate:    roundCost(dailyPrice),
+			MonthlyRate:  roundCost(monthlyPrice),
+			YearlyRate:   roundCost(yearlyPrice),
+			HoursRunning: nil,
+			Lifetime:     nil,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported resource type: %s", config.ResourceType)
 	}
 
-	// Calculate time periods
-	now := time.Now()
-	hourlyPrice := monthlyPrice / 730 // Average hours in a month
+	// Calculate prices for different time periods
 	dailyPrice := hourlyPrice * 24
-	yearlyPrice := monthlyPrice * 12
+	monthlyPrice := dailyPrice * 30  // Approximate
+	yearlyPrice := dailyPrice * 365
+	lifetimeHours := time.Since(config.CreationTime).Hours()
+	lifetime := hourlyPrice * lifetimeHours
 
-	// Calculate lifetime cost based on how long it's been unused
-	lifetimeHours := now.Sub(config.CreationTime).Hours()
-	lifetimePrice := hourlyPrice * lifetimeHours
+	// For all other resources, we calculate lifetime cost based on hours running
+	hours := roundCost(lifetimeHours)
 
 	return &CostBreakdown{
-		Hourly:   hourlyPrice,
-		Daily:    dailyPrice,
-		Monthly:  monthlyPrice,
-		Yearly:   yearlyPrice,
-		Lifetime: lifetimePrice,
+		HourlyRate:   roundCost(hourlyPrice),
+		DailyRate:    roundCost(dailyPrice),
+		MonthlyRate:  roundCost(monthlyPrice),
+		YearlyRate:   roundCost(yearlyPrice),
+		HoursRunning: &hours,
+		Lifetime:     &lifetime,
 	}, nil
 }

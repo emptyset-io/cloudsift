@@ -21,6 +21,7 @@ type scanOptions struct {
 	format           string
 	output           string
 	bucket           string
+	bucketRegion     string
 	outputDir        string
 	daysUnused       int    // Number of days a resource must be unused to be reported
 	organizationRole string // Role to assume for listing organization accounts
@@ -48,8 +49,20 @@ Examples:
   cloudsift scan --scanners ebs-volumes --regions us-west-2
 
   # Scan multiple resource types in multiple regions of all organization accounts
-  cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole`,
+  cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole
+
+  # Output results to S3
+  cloudsift scan --output s3 --bucket my-bucket --bucket-region us-west-2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate S3 parameters
+			if opts.output == "s3" {
+				if opts.bucket == "" {
+					return fmt.Errorf("--bucket is required when --output=s3")
+				}
+				if opts.bucketRegion == "" {
+					return fmt.Errorf("--bucket-region is required when --output=s3")
+				}
+			}
 			return runScan(cmd, opts)
 		},
 	}
@@ -58,7 +71,8 @@ Examples:
 	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to run (default: all available scanners)")
 	cmd.Flags().StringVar(&opts.format, "format", "text", "Output format (text, json)")
 	cmd.Flags().StringVar(&opts.output, "output", "filesystem", "Output destination (filesystem, s3)")
-	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name for output (required when --output=s3)")
+	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name (required when --output=s3)")
+	cmd.Flags().StringVar(&opts.bucketRegion, "bucket-region", "", "S3 bucket region (required when --output=s3)")
 	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory for file output (required when --output=file)")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
 	cmd.Flags().StringVar(&opts.organizationRole, "organization-role", "", "Role to assume for listing organization accounts")
@@ -224,9 +238,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 	// Create output writer
 	writer := output.NewWriter(output.Config{
-		Type:      output.Type(opts.output),
-		S3Bucket:  opts.bucket,
-		OutputDir: opts.outputDir,
+		Type:         output.Type(opts.output),
+		S3Bucket:     opts.bucket,
+		S3Region:     opts.bucketRegion,
+		OutputDir:    opts.outputDir,
+		Region:       regions[0], // Use first region for AWS operations
 	})
 
 	// Write results for each account
@@ -362,9 +378,11 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 
 	// Create output writer
 	writer := output.NewWriter(output.Config{
-		Type:      output.Type(opts.output),
-		S3Bucket:  opts.bucket,
-		OutputDir: opts.outputDir,
+		Type:         output.Type(opts.output),
+		S3Bucket:     opts.bucket,
+		S3Region:     opts.bucketRegion,
+		OutputDir:    opts.outputDir,
+		Region:       regions[0], // Use first region for AWS operations
 	})
 
 	// Write results for each account and region
