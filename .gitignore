@@ -1,0 +1,8 @@
+/bin/
+/vendor/
+/scripts/*
+/output/
+/cache/
+/reports/
+sample_scan_data.json
+/dist/
