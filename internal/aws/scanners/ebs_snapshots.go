@@ -49,19 +49,39 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	var results awslib.ScanResults
 	err = svc.DescribeSnapshotsPages(input, func(page *ec2.DescribeSnapshotsOutput, lastPage bool) bool {
 		for _, snapshot := range page.Snapshots {
+			// Calculate age of snapshot
+			age := time.Since(*snapshot.StartTime)
+			ageInDays := int(age.Hours() / 24)
+
+			// Skip if snapshot is not old enough
+			if ageInDays < opts.DaysUnused {
+				continue
+			}
+
 			// Convert AWS tags to map
 			tags := make(map[string]string)
 			for _, tag := range snapshot.Tags {
 				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
 			}
 
-			// Calculate age of snapshot
-			age := time.Since(*snapshot.StartTime)
-			ageInDays := int(age.Hours() / 24)
+			// Calculate costs
+			costEstimator, err := awslib.NewCostEstimator("cache/costs.json")
+			if err != nil {
+				// Log error but continue without costs
+				fmt.Printf("Failed to create cost estimator: %v\n", err)
+			}
 
-			// Only include snapshots older than the threshold
-			if ageInDays <= opts.DaysUnused {
-				continue
+			var costs *awslib.CostBreakdown
+			if costEstimator != nil {
+				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
+					ResourceType:  "EBSSnapshots",
+					ResourceSize:  aws.Int64Value(snapshot.VolumeSize),
+					Region:       opts.Region,
+					CreationTime: *snapshot.StartTime,
+				})
+				if err != nil {
+					fmt.Printf("Failed to calculate costs for snapshot %s: %v\n", aws.StringValue(snapshot.SnapshotId), err)
+				}
 			}
 
 			// Collect all relevant details
@@ -78,6 +98,10 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				"data_encryption_key_id": aws.StringValue(snapshot.DataEncryptionKeyId),
 				"owner_id":               aws.StringValue(snapshot.OwnerId),
 				"progress":               aws.StringValue(snapshot.Progress),
+			}
+
+			if costs != nil {
+				details["costs"] = costs
 			}
 
 			results = append(results, awslib.ScanResult{
