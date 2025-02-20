@@ -11,38 +11,39 @@ import (
 func NewAccountsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "accounts",
-		Short: "List AWS accounts",
-		Long: `List AWS accounts based on the current configuration.
-
-If the current credentials have organization access, lists all accounts in the organization.
-Otherwise, lists the current account information.
-
-Use --profile to specify an AWS profile to use.
-Use --organization-role to specify a role to assume for organization-wide operations.`,
-		Example: `  # List accounts using default profile
+		Short: "List available AWS accounts",
+		Long: `List all AWS accounts that can be scanned.
+If no organization role is provided, only shows the current account.
+If an organization role is provided, shows all accounts in the organization.`,
+		Example: `  # List current account
   cloudsift list accounts
 
-  # List accounts using specific profile
-  cloudsift list accounts --profile dev
-
-  # List accounts using organization role
-  cloudsift list accounts --organization-role arn:aws:iam::123456789012:role/OrganizationRole`,
+  # List all accounts in organization
+  cloudsift list accounts --organization-role OrganizationAccessRole`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAccounts()
+			return runAccounts(cmd)
 		},
 	}
 
+	cmd.Flags().String("organization-role", "", "Role to assume for listing organization accounts")
 	return cmd
 }
 
-func runAccounts() error {
-	accounts, err := aws.ListAccounts()
+func runAccounts(cmd *cobra.Command) error {
+	organizationRole, _ := cmd.Flags().GetString("organization-role")
+	accounts, err := aws.ListAccounts(organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
+	if len(accounts) == 0 {
+		fmt.Println("No accounts found")
+		return nil
+	}
+
+	fmt.Println("Available accounts:")
 	for _, account := range accounts {
-		fmt.Printf("%s - %s\n", account.ID, account.Name)
+		fmt.Printf("  %s - %s\n", account.ID, account.Name)
 	}
 
 	return nil

@@ -16,13 +16,15 @@ import (
 )
 
 type scanOptions struct {
-	regions    string
-	scanners   string
-	format     string
-	output     string
-	bucket     string
-	outputDir  string
-	daysUnused int // Number of days a resource must be unused to be reported
+	regions          string
+	scanners         string
+	format           string
+	output           string
+	bucket           string
+	outputDir        string
+	daysUnused       int    // Number of days a resource must be unused to be reported
+	organizationRole string // Role to assume for listing organization accounts
+	scannerRole      string // Role to assume for scanning accounts
 }
 
 // NewScanCmd creates the scan command
@@ -35,16 +37,18 @@ func NewScanCmd() *cobra.Command {
 		Long: `Scan AWS resources for potential cost savings.
 
 When no scanners or regions are specified, all available scanners will be run in all available regions.
+When no organization-role is specified, only the current account will be scanned.
+When both organization-role and scanner-role are specified, all accounts in the organization will be scanned.
 
 Examples:
-  # Scan all resources in all regions
+  # Scan all resources in all regions of current account
   cloudsift scan
 
-  # Scan EBS volumes in us-west-2
+  # Scan EBS volumes in us-west-2 of current account
   cloudsift scan --scanners ebs-volumes --regions us-west-2
 
-  # Scan multiple resource types in multiple regions
-  cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1`,
+  # Scan multiple resource types in multiple regions of all organization accounts
+  cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScan(cmd, opts)
 		},
@@ -57,6 +61,8 @@ Examples:
 	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name for output (required when --output=s3)")
 	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory for file output (required when --output=file)")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
+	cmd.Flags().StringVar(&opts.organizationRole, "organization-role", "", "Role to assume for listing organization accounts")
+	cmd.Flags().StringVar(&opts.scannerRole, "scanner-role", "", "Role to assume for scanning accounts")
 
 	return cmd
 }
@@ -112,13 +118,13 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	// Get list of accounts to scan
-	accounts, err := aws.ListAccounts()
+	accounts, err := aws.ListAccounts(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
 	// Create base session for validation
-	sess, err := aws.GetSession()
+	sess, err := aws.GetSession(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}
@@ -183,6 +189,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
+						Role:       opts.scannerRole,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
@@ -252,13 +259,13 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	// Get list of accounts to scan
-	accounts, err := aws.ListAccounts()
+	accounts, err := aws.ListAccounts(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
 	// Create base session for validation
-	sess, err := aws.GetSession()
+	sess, err := aws.GetSession(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}
@@ -324,6 +331,7 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
+						Role:       opts.scannerRole,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)

@@ -54,6 +54,7 @@ type Config struct {
 	OutputDir string
 	Retry     *RetryConfig
 	Upload    *UploadConfig
+	Region    string
 }
 
 // Writer handles writing scan results to different destinations
@@ -200,7 +201,7 @@ func (w *Writer) writeToS3WithRetry(path string, data []byte) error {
 // writeToS3 writes data to an S3 bucket with progress tracking
 func (w *Writer) writeToS3(path string, data []byte) error {
 	// Get AWS session
-	sess, err := awsutil.GetSession()
+	sess, err := awsutil.GetSession("", w.config.Region)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}

@@ -37,10 +37,12 @@ func (s *EBSVolumeScanner) Label() string {
 
 // Scan implements Scanner interface
 func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	sess, err := awslib.GetSession(opts.Region)
+	// Create base session with region
+	sess, err := awslib.GetSession(opts.Role, opts.Region)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
+			"role":   opts.Role,
 		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
@@ -54,7 +56,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	}
 	accountID := aws.StringValue(identity.Account)
 
-	// Scan for volumes
+	// Create EC2 service client
 	svc := ec2.New(sess)
 	input := &ec2.DescribeVolumesInput{}
 

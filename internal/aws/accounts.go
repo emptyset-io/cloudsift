@@ -2,6 +2,7 @@ package aws
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/organizations"
@@ -15,20 +16,25 @@ type Account struct {
 }
 
 // ListAccounts attempts to list all accounts in the organization, falling back to current account if not in an org
-func ListAccounts() ([]Account, error) {
-	// First try to list organization accounts
-	orgAccounts, err := tryListOrganizationAccounts()
-	if err == nil {
+// If organizationRole is provided, assumes that role before listing accounts
+func ListAccounts(organizationRole string) ([]Account, error) {
+	// If organization role provided, try to list organization accounts
+	if organizationRole != "" {
+		orgAccounts, err := tryListOrganizationAccounts(organizationRole)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list organization accounts with role %s: %w", organizationRole, err)
+		}
 		return orgAccounts, nil
 	}
 
-	// If organization listing fails, fall back to current account
+	// If no organization role, fall back to current account
 	return listCurrentAccount()
 }
 
 // tryListOrganizationAccounts attempts to list all accounts in the organization
-func tryListOrganizationAccounts() ([]Account, error) {
-	sess, err := GetSession("us-west-2") // Organizations API requires a region
+func tryListOrganizationAccounts(organizationRole string) ([]Account, error) {
+	// Create session with organization role in us-west-2 (Organizations API requires a region)
+	sess, err := GetSession(organizationRole, "us-west-2")
 	if err != nil {
 		return nil, err
 	}
@@ -56,19 +62,73 @@ func tryListOrganizationAccounts() ([]Account, error) {
 
 // listCurrentAccount gets the current account information
 func listCurrentAccount() ([]Account, error) {
-	sess, err := GetSession() // STS works in any region
+	// First get current account ID
+	sess, err := GetSession("")
 	if err != nil {
 		return nil, err
 	}
 
-	svc := sts.New(sess)
-	result, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	stsSvc := sts.New(sess)
+	identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get current account: %w", err)
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	return []Account{{
-		ID:   aws.StringValue(result.Account),
-		Name: "current", // We don't have access to the account name when not in an organization
-	}}, nil
+	accountID := aws.StringValue(identity.Account)
+
+	// Try to get account name from Organizations API
+	orgSess, err := GetSession("", "us-west-2") // Organizations API requires a region
+	if err != nil {
+		return nil, err
+	}
+
+	orgSvc := organizations.New(orgSess)
+	describeResult, err := orgSvc.DescribeAccount(&organizations.DescribeAccountInput{
+		AccountId: aws.String(accountID),
+	})
+
+	// If we can get the account name from Organizations API, use it
+	if err == nil && describeResult.Account != nil && describeResult.Account.Name != nil {
+		return []Account{
+			{
+				ID:   accountID,
+				Name: aws.StringValue(describeResult.Account.Name),
+			},
+		}, nil
+	}
+
+	// If we can't get the name from Organizations API, try to get it from account alias
+	iamSvc := sts.New(sess)
+	aliasResult, err := iamSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err == nil && aliasResult.Arn != nil {
+		// Extract account alias from ARN if available
+		arn := aws.StringValue(aliasResult.Arn)
+		if arnParts := strings.Split(arn, ":"); len(arnParts) >= 6 {
+			if userParts := strings.Split(arnParts[5], "/"); len(userParts) >= 2 {
+				return []Account{
+					{
+						ID:   accountID,
+						Name: userParts[1], // Use the IAM user/role name as a fallback
+					},
+				}, nil
+			}
+		}
+	}
+
+	// If all else fails, use a generic name based on the account type
+	if strings.Contains(aws.StringValue(identity.Arn), ":root") {
+		return []Account{
+			{
+				ID:   accountID,
+				Name: "Root Account",
+			},
+		}, nil
+	}
+
+	return []Account{
+		{
+			ID:   accountID,
+			Name: "Member Account",
+		},
+	}, nil
 }
