@@ -1,0 +1,5 @@
+/bin/
+/vendor/
+/scripts/*
+/output/
+/reports/
