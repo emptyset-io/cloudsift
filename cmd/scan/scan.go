@@ -33,7 +33,13 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan AWS resources",
 		Long: `Scan AWS resources for potential cost savings.
+
+When no scanners or regions are specified, all available scanners will be run in all available regions.
+
 Examples:
+  # Scan all resources in all regions
+  cloudsift scan
+
   # Scan EBS volumes in us-west-2
   cloudsift scan --scanners ebs-volumes --regions us-west-2
 
@@ -44,16 +50,13 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.regions, "regions", "", "Comma-separated list of regions to scan")
-	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to run")
+	cmd.Flags().StringVar(&opts.regions, "regions", "", "Comma-separated list of regions to scan (default: all available regions)")
+	cmd.Flags().StringVar(&opts.scanners, "scanners", "", "Comma-separated list of scanners to run (default: all available scanners)")
 	cmd.Flags().StringVar(&opts.format, "format", "text", "Output format (text, json)")
-	cmd.Flags().StringVar(&opts.output, "output", "stdout", "Output destination (stdout, file, s3)")
+	cmd.Flags().StringVar(&opts.output, "output", "filesystem", "Output destination (filesystem, s3)")
 	cmd.Flags().StringVar(&opts.bucket, "bucket", "", "S3 bucket name for output (required when --output=s3)")
 	cmd.Flags().StringVar(&opts.outputDir, "output-dir", "", "Directory for file output (required when --output=file)")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 30, "Number of days a resource must be unused to be reported")
-
-	cmd.MarkFlagRequired("scanners")
-	cmd.MarkFlagRequired("regions")
 
 	return cmd
 }
@@ -65,13 +68,27 @@ type scanResult struct {
 }
 
 func getScanners(scannerList string) ([]aws.Scanner, error) {
+	var scanners []aws.Scanner
+
+	// If no scanners specified, get all available scanners
 	if scannerList == "" {
-		return nil, fmt.Errorf("no scanners specified")
+		names := aws.DefaultRegistry.ListScanners()
+		if len(names) == 0 {
+			return nil, fmt.Errorf("no scanners available in registry")
+		}
+		
+		for _, name := range names {
+			scanner, err := aws.DefaultRegistry.GetScanner(name)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
+			}
+			scanners = append(scanners, scanner)
+		}
+		return scanners, nil
 	}
 
-	var scanners []aws.Scanner
+	// Parse comma-separated list of scanners
 	names := strings.Split(scannerList, ",")
-
 	for _, name := range names {
 		scanner, err := aws.DefaultRegistry.GetScanner(name)
 		if err != nil {
@@ -108,15 +125,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 	// Get and validate regions
 	var regions []string
-	if opts.regions != "" {
-		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(sess, regions); err != nil {
-			return err
-		}
-	} else {
+	if opts.regions == "" {
+		// If no regions specified, get all available regions
 		regions, err = aws.GetAvailableRegions(sess)
 		if err != nil {
 			return fmt.Errorf("failed to get available regions: %w", err)
+		}
+	} else {
+		// Parse and validate comma-separated list of regions
+		regions = strings.Split(opts.regions, ",")
+		if err := aws.ValidateRegions(sess, regions); err != nil {
+			return fmt.Errorf("invalid regions: %w", err)
 		}
 	}
 
@@ -246,15 +265,17 @@ func runScanNew(cmd *cobra.Command, opts *scanOptions) error {
 
 	// Get and validate regions
 	var regions []string
-	if opts.regions != "" {
-		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(sess, regions); err != nil {
-			return err
-		}
-	} else {
+	if opts.regions == "" {
+		// If no regions specified, get all available regions
 		regions, err = aws.GetAvailableRegions(sess)
 		if err != nil {
 			return fmt.Errorf("failed to get available regions: %w", err)
+		}
+	} else {
+		// Parse and validate comma-separated list of regions
+		regions = strings.Split(opts.regions, ",")
+		if err := aws.ValidateRegions(sess, regions); err != nil {
+			return fmt.Errorf("invalid regions: %w", err)
 		}
 	}
 
