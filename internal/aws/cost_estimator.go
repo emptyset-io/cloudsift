@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/pricing"
 )
 
@@ -25,10 +27,11 @@ type CostBreakdown struct {
 
 // ResourceCostConfig holds configuration for resource cost calculation
 type ResourceCostConfig struct {
-	ResourceType string
-	ResourceSize int64
+	ResourceType  string
+	ResourceSize  interface{} // Can be int64 for storage sizes or string for instance types
 	Region       string
 	CreationTime time.Time
+	VolumeType   string // Volume type for EBS (e.g., "gp2", "gp3", "io1")
 }
 
 // AWS region to location name mapping for pricing API
@@ -103,16 +106,13 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	sess, err := GetSession("us-east-1") // Pricing API is only available in us-east-1
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": "us-east-1",
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
-	}
+	// Create session in us-east-1 (required for pricing API)
+	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
 
+	// Create pricing client with explicit config to ensure region is set
+	cfg := aws.NewConfig().WithRegion("us-east-1")
 	ce := &CostEstimator{
-		pricingClient: pricing.New(sess),
+		pricingClient: pricing.New(sess, cfg),
 		cacheFile:     cacheFile,
 		priceCache:    make(map[string]float64),
 	}
@@ -132,35 +132,49 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 }
 
 func (ce *CostEstimator) loadCache() error {
-	ce.cacheLock.Lock()
-	defer ce.cacheLock.Unlock()
+	// Create cache directory if it doesn't exist
+	cacheDir := filepath.Dir(ce.cacheFile)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
 
+	// Read cache file
 	data, err := os.ReadFile(ce.cacheFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logging.Debug("Cache file does not exist, starting with empty cache", map[string]interface{}{
-				"cache_file": ce.cacheFile,
-			})
-			return nil // Cache file doesn't exist yet
+			// Initialize empty cache if file doesn't exist
+			ce.priceCache = make(map[string]float64)
+			return nil
 		}
-		logging.Error("Failed to read cache file", err, map[string]interface{}{
-			"cache_file": ce.cacheFile,
-		})
 		return fmt.Errorf("failed to read cache file: %w", err)
 	}
 
-	if err := json.Unmarshal(data, &ce.priceCache); err != nil {
-		logging.Error("Failed to unmarshal cache data", err, map[string]interface{}{
-			"cache_file": ce.cacheFile,
-		})
-		return fmt.Errorf("failed to unmarshal cache data: %w", err)
+	// Parse cache data
+	var cache map[string]float64
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return fmt.Errorf("failed to parse cache data: %w", err)
 	}
 
-	logging.Debug("Cache loaded successfully", map[string]interface{}{
-		"cache_file": ce.cacheFile,
-		"cache_size": len(ce.priceCache),
-	})
+	// Convert old cache format to new format if needed
+	newCache := make(map[string]float64)
+	for key, price := range cache {
+		parts := strings.Split(key, "_")
+		if len(parts) == 2 && (parts[0] == "EBSVolumes" || parts[0] == "EBSSnapshots") {
+			// Old format: EBSVolumes_us-west-2
+			// Convert to new format: EBSVolumes_us-west-2_gp2
+			newKey := fmt.Sprintf("%s_%s_%s", parts[0], parts[1], "gp2")
+			newCache[newKey] = price
+			logging.Debug("Converting cache key format", map[string]interface{}{
+				"old_key": key,
+				"new_key": newKey,
+				"price":   price,
+			})
+		} else {
+			newCache[key] = price
+		}
+	}
 
+	ce.priceCache = newCache
 	return nil
 }
 
@@ -168,33 +182,38 @@ func (ce *CostEstimator) saveCache() error {
 	ce.saveLock.Lock()
 	defer ce.saveLock.Unlock()
 
-	ce.cacheLock.RLock()
-	data, err := json.MarshalIndent(ce.priceCache, "", "  ")
-	ce.cacheLock.RUnlock()
-
-	if err != nil {
-		logging.Error("Failed to marshal cache", err, map[string]interface{}{
-			"cache_file": ce.cacheFile,
-		})
-		return fmt.Errorf("failed to marshal cache: %w", err)
+	// Create cache directory if it doesn't exist
+	cacheDir := filepath.Dir(ce.cacheFile)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	if err := os.WriteFile(ce.cacheFile, data, 0644); err != nil {
-		logging.Error("Failed to write cache file", err, map[string]interface{}{
-			"cache_file": ce.cacheFile,
-		})
-		return fmt.Errorf("failed to write cache file: %w", err)
+	// Marshal cache data
+	data, err := json.MarshalIndent(ce.priceCache, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal cache data: %w", err)
+	}
+
+	// Write to temp file first
+	tempFile := ce.cacheFile + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp cache file: %w", err)
+	}
+
+	// Rename temp file to actual cache file (atomic operation)
+	if err := os.Rename(tempFile, ce.cacheFile); err != nil {
+		return fmt.Errorf("failed to rename temp cache file: %w", err)
 	}
 
 	logging.Debug("Cache saved successfully", map[string]interface{}{
 		"cache_file": ce.cacheFile,
-		"cache_size": len(ce.priceCache),
+		"entries":    len(ce.priceCache),
 	})
 
 	return nil
 }
 
-func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, error) {
+func (ce *CostEstimator) getAWSPrice(resourceType, region string, config ResourceCostConfig) (float64, error) {
 	// Get location name for the region
 	location, ok := regionToLocation[region]
 	if !ok {
@@ -202,7 +221,32 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 	}
 
 	// Create cache key
-	cacheKey := fmt.Sprintf("%s_%s", resourceType, region)
+	var cacheKey string
+	switch resourceType {
+	case "EC2":
+		instanceType, ok := config.ResourceSize.(string)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for EC2: %T", config.ResourceSize)
+		}
+		cacheKey = fmt.Sprintf("%s_%s_%s", resourceType, region, instanceType)
+	case "EBSVolumes", "EBSSnapshots":
+		_, ok := config.ResourceSize.(int64)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for %s: %T", resourceType, config.ResourceSize)
+		}
+		if config.VolumeType == "" {
+			return 0, fmt.Errorf("volume type is required for %s", resourceType)
+		}
+		cacheKey = fmt.Sprintf("%s_%s_%s", resourceType, region, config.VolumeType)
+		logging.Debug("Generated cache key for storage", map[string]interface{}{
+			"resource_type": resourceType,
+			"region":        region,
+			"volume_type":   config.VolumeType,
+			"cache_key":     cacheKey,
+		})
+	default:
+		cacheKey = fmt.Sprintf("%s_%s", resourceType, region)
+	}
 
 	// Check cache first
 	ce.cacheLock.RLock()
@@ -211,6 +255,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 		logging.Debug("Price found in cache", map[string]interface{}{
 			"resource_type": resourceType,
 			"region":        region,
+			"cache_key":     cacheKey,
 			"price":         price,
 		})
 		return price, nil
@@ -220,12 +265,70 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 	logging.Debug("Price not found in cache, fetching from AWS", map[string]interface{}{
 		"resource_type": resourceType,
 		"region":        region,
+		"cache_key":     cacheKey,
 	})
 
 	var filters []*pricing.Filter
 	switch resourceType {
-	case "EBSVolumes":
+	case "EC2":
+		// Extract instance type from resource size string
+		instanceType, ok := config.ResourceSize.(string)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for EC2: %T", config.ResourceSize)
+		}
 		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("operatingSystem"),
+				Value: aws.String("Linux"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("instanceType"),
+				Value: aws.String(instanceType),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("tenancy"),
+				Value: aws.String("Shared"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("preInstalledSw"),
+				Value: aws.String("NA"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("capacityStatus"),
+				Value: aws.String("Used"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonEC2"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("productFamily"),
+				Value: aws.String("Compute Instance"),
+			},
+		}
+	case "EBSVolumes":
+		_, ok := config.ResourceSize.(int64)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for EBSVolumes: %T", config.ResourceSize)
+		}
+		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonEC2"),
+			},
 			{
 				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("productFamily"),
@@ -233,8 +336,8 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("volumeType"),
-				Value: aws.String("General Purpose"),
+				Field: aws.String("volumeApiName"),
+				Value: aws.String(config.VolumeType),
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
@@ -243,7 +346,16 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 			},
 		}
 	case "EBSSnapshots":
+		_, ok := config.ResourceSize.(int64)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for EBSSnapshots: %T", config.ResourceSize)
+		}
 		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonEC2"),
+			},
 			{
 				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("productFamily"),
@@ -251,8 +363,18 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("volumeApiName"),
+				Value: aws.String(config.VolumeType),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("location"),
 				Value: aws.String(location),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("usagetype"),
+				Value: aws.String("EBS:SnapshotUsage"),
 			},
 		}
 	default:
@@ -264,11 +386,18 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 		Filters:     filters,
 	}
 
+	logging.Debug("Fetching pricing from AWS", map[string]interface{}{
+		"resource_type": resourceType,
+		"region":        region,
+		"filters":       filters,
+	})
+
 	result, err := ce.pricingClient.GetProducts(input)
 	if err != nil {
 		logging.Error("Failed to get pricing from AWS", err, map[string]interface{}{
 			"resource_type": resourceType,
 			"region":        region,
+			"filters":       filters,
 		})
 		return 0, fmt.Errorf("failed to get pricing: %w", err)
 	}
@@ -277,9 +406,16 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 		logging.Error("No pricing information found", fmt.Errorf("no pricing data"), map[string]interface{}{
 			"resource_type": resourceType,
 			"region":        region,
+			"filters":       filters,
 		})
 		return 0, fmt.Errorf("no pricing information found")
 	}
+
+	logging.Debug("Got pricing results from AWS", map[string]interface{}{
+		"resource_type":     resourceType,
+		"region":           region,
+		"price_list_count": len(result.PriceList),
+	})
 
 	// Parse the price from the response
 	var priceFloat float64
@@ -345,12 +481,14 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 				if err := ce.saveCache(); err != nil {
 					logging.Error("Failed to save cache", err, map[string]interface{}{
 						"cache_file": ce.cacheFile,
+						"cache_key": cacheKey,
 					})
 				}
 
 				logging.Debug("Price fetched and cached successfully", map[string]interface{}{
 					"resource_type": resourceType,
 					"region":        region,
+					"cache_key":     cacheKey,
 					"price":         priceFloat,
 				})
 
@@ -364,15 +502,13 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string) (float64, erro
 
 // CalculateCost calculates the cost for a given resource
 func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdown, error) {
-	logging.Debug("Calculating resource cost", map[string]interface{}{
+	logging.Debug("Calculating cost", map[string]interface{}{
 		"resource_type": config.ResourceType,
-		"resource_size": config.ResourceSize,
 		"region":        config.Region,
-		"creation_time": config.CreationTime.Format(time.RFC3339),
 	})
 
 	// Get price from AWS Pricing API
-	pricePerGB, err := ce.getAWSPrice(config.ResourceType, config.Region)
+	pricePerUnit, err := ce.getAWSPrice(config.ResourceType, config.Region, config)
 	if err != nil {
 		logging.Error("Failed to get AWS price", err, map[string]interface{}{
 			"resource_type": config.ResourceType,
@@ -381,30 +517,39 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 		return nil, fmt.Errorf("failed to get AWS price: %w", err)
 	}
 
-	// Calculate total monthly price based on size
-	monthlyPrice := float64(config.ResourceSize) * pricePerGB
+	// Calculate total monthly price based on resource type
+	var monthlyPrice float64
+	switch config.ResourceType {
+	case "EC2":
+		// For EC2, price is already per hour, so just multiply by hours in a month
+		monthlyPrice = pricePerUnit * 730 // Average hours in a month (365.25 * 24 / 12)
+	case "EBSVolumes", "EBSSnapshots":
+		// For storage resources, multiply by size (GB)
+		// pricePerUnit is already in GB-month, so just multiply by size
+		size, ok := config.ResourceSize.(int64)
+		if !ok {
+			return nil, fmt.Errorf("invalid resource size type for cost calculation: %T", config.ResourceSize)
+		}
+		monthlyPrice = float64(size) * pricePerUnit // Price per GB-month
+	default:
+		return nil, fmt.Errorf("unsupported resource type: %s", config.ResourceType)
+	}
 
 	// Calculate time periods
 	now := time.Now()
-	lifetime := now.Sub(config.CreationTime).Hours()
-
-	// Convert monthly price to other time periods
 	hourlyPrice := monthlyPrice / 730 // Average hours in a month
-	breakdown := &CostBreakdown{
+	dailyPrice := hourlyPrice * 24
+	yearlyPrice := monthlyPrice * 12
+
+	// Calculate lifetime cost based on how long it's been unused
+	lifetimeHours := now.Sub(config.CreationTime).Hours()
+	lifetimePrice := hourlyPrice * lifetimeHours
+
+	return &CostBreakdown{
 		Hourly:   hourlyPrice,
-		Daily:    hourlyPrice * 24,
+		Daily:    dailyPrice,
 		Monthly:  monthlyPrice,
-		Yearly:   monthlyPrice * 12,
-		Lifetime: hourlyPrice * lifetime,
-	}
-
-	logging.Debug("Cost calculation completed", map[string]interface{}{
-		"resource_type": config.ResourceType,
-		"resource_size": config.ResourceSize,
-		"price_per_gb":  pricePerGB,
-		"monthly_price": monthlyPrice,
-		"breakdown":     breakdown,
-	})
-
-	return breakdown, nil
+		Yearly:   yearlyPrice,
+		Lifetime: lifetimePrice,
+	}, nil
 }

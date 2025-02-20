@@ -1,3 +1,4 @@
 {
-  "EBSVolumes_us-west-2": 0.1
+  "EBSVolumes_us-west-2_gp3": 0.08,
+  "EBSVolumes_us-west-2_standard": 0.05
 }

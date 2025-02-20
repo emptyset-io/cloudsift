@@ -102,11 +102,27 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
+				volumeSize := aws.Int64Value(volume.Size)
+				volumeType := aws.StringValue(volume.VolumeType)
+				if volumeType == "" {
+					volumeType = "gp2" // Default to gp2 if not specified
+				}
+
+				logging.Debug("Calculating volume costs", map[string]interface{}{
+					"account_id":    accountID,
+					"region":        opts.Region,
+					"resource_name": resourceName,
+					"resource_id":   aws.StringValue(volume.VolumeId),
+					"volume_size":   volumeSize,
+					"volume_type":   volumeType,
+				})
+
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType: "EBSVolumes",
-					ResourceSize: aws.Int64Value(volume.Size),
+					ResourceType:  "EBSVolumes",
+					ResourceSize: volumeSize,
 					Region:       opts.Region,
 					CreationTime: *volume.CreateTime,
+					VolumeType:   volumeType,
 				})
 				if err != nil {
 					logging.Error("Failed to calculate costs", err, map[string]interface{}{

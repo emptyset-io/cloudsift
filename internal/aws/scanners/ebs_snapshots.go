@@ -102,11 +102,38 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
+				snapshotSize := aws.Int64Value(snapshot.VolumeSize)
+
+				// Get volume type from parent volume if available
+				volumeType := "gp2" // Default to gp2
+				if aws.StringValue(snapshot.VolumeId) != "" {
+					// Try to get the parent volume
+					volumeInput := &ec2.DescribeVolumesInput{
+						VolumeIds: []*string{snapshot.VolumeId},
+					}
+					volumeOutput, err := svc.DescribeVolumes(volumeInput)
+					if err == nil && len(volumeOutput.Volumes) > 0 {
+						if vType := aws.StringValue(volumeOutput.Volumes[0].VolumeType); vType != "" {
+							volumeType = vType
+						}
+					}
+				}
+
+				logging.Debug("Calculating snapshot costs", map[string]interface{}{
+					"account_id":    accountID,
+					"region":        opts.Region,
+					"resource_name": resourceName,
+					"resource_id":   aws.StringValue(snapshot.SnapshotId),
+					"snapshot_size": snapshotSize,
+					"volume_type":   volumeType,
+				})
+
 				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType: "EBSSnapshots",
-					ResourceSize: aws.Int64Value(snapshot.VolumeSize),
+					ResourceType:  "EBSSnapshots",
+					ResourceSize: snapshotSize,
 					Region:       opts.Region,
 					CreationTime: *snapshot.StartTime,
+					VolumeType:   volumeType,
 				})
 				if err != nil {
 					logging.Error("Failed to calculate costs", err, map[string]interface{}{
