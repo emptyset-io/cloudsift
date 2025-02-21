@@ -490,3 +490,39 @@ function filterResources(filterType, value) {
         }
     }
 }
+
+// Export table to CSV
+function exportToCSV() {
+    const table = document.querySelector('#unused-resources table');
+    if (!table) return;
+
+    const rows = Array.from(table.querySelectorAll('tr'));
+    let csvContent = "data:text/csv;charset=utf-8,";
+
+    // Get headers
+    const headers = Array.from(rows[0].querySelectorAll('th')).map(header => {
+        // Remove the sort icon text
+        return `"${header.textContent.replace('↕', '').trim()}"`;
+    });
+    csvContent += headers.join(',') + '\n';
+
+    // Get data rows
+    rows.slice(1).forEach(row => {
+        const cells = Array.from(row.querySelectorAll('td')).map(cell => {
+            // Get the text content, removing any HTML
+            let text = cell.textContent.trim();
+            // Escape quotes and wrap in quotes
+            return `"${text.replace(/"/g, '""')}"`;
+        });
+        csvContent += cells.join(',') + '\n';
+    });
+
+    // Create download link
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'unused_resources.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}

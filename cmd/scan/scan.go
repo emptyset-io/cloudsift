@@ -158,46 +158,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
-	// Create base session for validation
-	sess, err := aws.GetSession(opts.organizationRole)
+	// Get list of regions to scan
+	regions, err := getRegionsToScan(opts)
 	if err != nil {
-		return fmt.Errorf("failed to create AWS session: %w", err)
+		return fmt.Errorf("failed to get regions: %w", err)
 	}
-
-	// Get and validate regions
-	var regions []string
-	if opts.regions == "" {
-		// If no regions specified, get all available regions
-		regions, err = aws.GetAvailableRegions(sess)
-		if err != nil {
-			return fmt.Errorf("failed to get available regions: %w", err)
-		}
-	} else {
-		// Parse and validate comma-separated list of regions
-		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(sess, regions); err != nil {
-			return fmt.Errorf("invalid regions: %w", err)
-		}
-	}
-
-	// Log scan start with configuration and start timing
-	var scannerNames []string
-	for _, s := range scanners {
-		scannerNames = append(scannerNames, s.Label())
-	}
-
-	// Convert accounts to the format expected by the logger
-	var accountInfo []logging.Account
-	for _, acc := range accounts {
-		accountInfo = append(accountInfo, logging.Account{
-			ID:   acc.ID,
-			Name: acc.Name,
-		})
-	}
-
-	startTime := time.Now()
-	totalScans := len(scanners) * len(regions) * len(accounts)
-	logging.ScanStart(scannerNames, accountInfo, regions)
 
 	// Initialize results map
 	accountResults := make(map[string]*scanResult)
@@ -245,6 +210,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 							results[i].Details = make(map[string]interface{})
 						}
 						results[i].Details["account_id"] = account.ID
+						results[i].Details["account_name"] = account.Name
 						if scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users" {
 							results[i].Details["region"] = "global"
 						} else {
@@ -317,6 +283,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			}
 
 			// Calculate scan metrics
+			startTime := time.Now()
+			totalScans := len(scanners) * len(regions) * len(accounts)
 			duration := time.Since(startTime).Seconds()
 			metrics := html.ScanMetrics{
 				TotalScans:        totalScans,
@@ -333,8 +301,35 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			// TODO: Implement S3 output
 			return fmt.Errorf("S3 output not yet implemented")
 		}
+	case "s3":
+		// TODO: Implement S3 output
+		return fmt.Errorf("S3 output not yet implemented")
 	}
 
 	logging.ScanComplete(len(accountResults))
 	return nil
+}
+
+func getRegionsToScan(opts *scanOptions) ([]string, error) {
+	// Create base session for validation
+	sess, err := aws.GetSession(opts.organizationRole)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	}
+
+	var regions []string
+	if opts.regions == "" {
+		// If no regions specified, get all available regions
+		regions, err = aws.GetAvailableRegions(sess)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get available regions: %w", err)
+		}
+	} else {
+		// Parse and validate comma-separated list of regions
+		regions = strings.Split(opts.regions, ",")
+		if err := aws.ValidateRegions(sess, regions); err != nil {
+			return nil, fmt.Errorf("invalid regions: %w", err)
+		}
+	}
+	return regions, nil
 }

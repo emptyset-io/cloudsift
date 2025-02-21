@@ -191,7 +191,7 @@
         <section class="summary-block wide">
             <h3>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 0 0 7H6"/>
                 </svg>
                 Combined Cost Breakdown
             </h3>
@@ -238,6 +238,14 @@
                     <line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
                 Unused Resources
+                <button id="export-csv" class="export-btn" onclick="exportToCSV()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Export to CSV
+                </button>
             </h3>
             <div class="input-container">
                 <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -271,7 +279,7 @@
                             <td>{{ .ResourceType }}</td>
                             <td>{{ .ResourceID }}</td>
                             <td>{{ .Region }}</td>
-                            <td>{{ .AccountID }}</td>
+                            <td>{{ .AccountID }} ({{ index $.AccountNames .AccountID }})</td>
                             <td>{{ .Reason }}</td>
                             <td>
                                 {{ if .Details }}

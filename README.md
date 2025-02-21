@@ -66,7 +66,7 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
 
 #### Scanner Role Permissions
 
-The scanner role requires the AWS-managed `ReadOnlyAccess` policy and the following trust relationship:
+The scanner role requires the AWS-managed `ReadOnlyAccess` policy manually attached to the role and the following trust relationship:
 
 ```json
 {
@@ -78,6 +78,15 @@ The scanner role requires the AWS-managed `ReadOnlyAccess` policy and the follow
                 "AWS": "arn:aws:iam::<organization_account_id>:role/<organization_role>"
             },
             "Action": "sts:AssumeRole"
+        },
+        {
+        "Action": [
+            "organizations:ListAccounts",
+            "organizations:DescribeAccount",
+            "ec2:DescribeRegions"
+        ],
+        "Effect": "Allow",
+        "Resource": "*"
         }
     ]
 }
