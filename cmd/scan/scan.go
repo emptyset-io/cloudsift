@@ -197,10 +197,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
 					results, err := scanner.Scan(aws.ScanOptions{
-						Region:          region,
-						DaysUnused:      opts.daysUnused,
-						Role:            opts.scannerRole,
-						TargetAccountID: account.ID,
+						Region:           region,
+						DaysUnused:       opts.daysUnused,
+						Role:             opts.scannerRole,
+						OrganizationRole: opts.organizationRole,
+						TargetAccountID:  account.ID,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
