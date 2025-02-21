@@ -150,6 +150,18 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 			} else {
 				return nil, fmt.Errorf("invalid NLB ARN format: %s", lbARN)
 			}
+		} else if strings.Contains(lbARN, "gwy/") {
+			namespace = "AWS/GatewayELB"
+			requestMetric = "ActiveFlowCount"
+			bytesMetric = "ProcessedBytes"
+			dimensionName = "LoadBalancer"
+			// For GWLB, we need to extract just the name part of the ARN
+			parts := strings.Split(lbARN, "/")
+			if len(parts) >= 3 {
+				dimensionValue = parts[len(parts)-2] + "/" + parts[len(parts)-1]
+			} else {
+				return nil, fmt.Errorf("invalid GWLB ARN format: %s", lbARN)
+			}
 		}
 	case *elb.LoadBalancerDescription:
 		namespace = "AWS/ELB"
@@ -281,6 +293,8 @@ func (s *ELBScanner) calculateELBCosts(lbType string) *awslib.CostBreakdown {
 		hourlyRate = 0.0225 // $0.0225 per ALB-hour
 	case "network":
 		hourlyRate = 0.0225 // $0.0225 per NLB-hour
+	case "gateway":
+		hourlyRate = 0.0225 // $0.0225 per GWLB-hour
 	case "classic":
 		hourlyRate = 0.025 // $0.025 per CLB-hour
 	default:
@@ -387,6 +401,8 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			lbType = "application"
 		} else if strings.Contains(lbARN, "net/") {
 			lbType = "network"
+		} else if strings.Contains(lbARN, "gwy/") {
+			lbType = "gateway"
 		}
 
 		// Calculate costs using fixed rates instead of pricing API
