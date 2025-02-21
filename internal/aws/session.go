@@ -57,35 +57,40 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 
 	// If organization role is set, assume it first
 	if opts.OrganizationRole != "" {
-		// Create new session with organization role
-		orgSess, err := AssumeRole("", opts.OrganizationRole, sess)
+		// First get organization account ID from base session
+		svc := sts.New(sess)
+		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get caller identity: %w", err)
+		}
+		orgAccountID := *identity.Account
+
+		// Assume organization role in the organization account
+		orgRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", orgAccountID, opts.OrganizationRole)
+		orgCreds := stscreds.NewCredentials(sess, orgRoleARN)
+		orgSess, err := session.NewSession(cfg.WithCredentials(orgCreds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to assume organization role: %w", err)
 		}
-		// Keep the region configuration when updating the session
-		sess = orgSess.Copy(cfg)
 
-		// If scanner role is specified, assume it using the organization role session
+		// If scanner role is specified, use org role session to assume scanner role in target account
 		if opts.Role != "" {
-			// Use target account ID if provided, otherwise get current account ID
 			targetAccountID := opts.TargetAccountID
 			if targetAccountID == "" {
-				svc := sts.New(sess)
-				identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-				if err != nil {
-					return nil, fmt.Errorf("failed to get caller identity: %w", err)
-				}
-				targetAccountID = *identity.Account
+				targetAccountID = orgAccountID // Default to org account if no target specified
 			}
 
-			// Now assume the scanner role from the organization role session in the target account
-			roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
-			creds := stscreds.NewCredentials(sess, roleARN)
-			return session.NewSession(cfg.WithCredentials(creds))
+			// Now assume the scanner role in the target account using the org role session
+			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
+			scannerCreds := stscreds.NewCredentials(orgSess, scannerRoleARN)
+			return session.NewSession(cfg.WithCredentials(scannerCreds))
 		}
-	} else if opts.Role != "" {
-		// If no organization role but scanner role specified, assume scanner role directly
-		// Use target account ID if provided, otherwise get current account ID
+
+		return orgSess, nil
+	}
+
+	// If no organization role but scanner role specified, assume scanner role directly
+	if opts.Role != "" {
 		targetAccountID := opts.TargetAccountID
 		if targetAccountID == "" {
 			svc := sts.New(sess)
