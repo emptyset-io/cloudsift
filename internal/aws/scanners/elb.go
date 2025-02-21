@@ -2,7 +2,6 @@ package scanners
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -132,14 +131,25 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 			requestMetric = "RequestCount"
 			bytesMetric = "ProcessedBytes"
 			dimensionName = "LoadBalancer"
-			dimensionValue = lbARN
+			// For ALB, we need to extract just the name part of the ARN
+			parts := strings.Split(lbARN, "/")
+			if len(parts) >= 3 {
+				dimensionValue = parts[len(parts)-2] + "/" + parts[len(parts)-1]
+			} else {
+				return nil, fmt.Errorf("invalid ALB ARN format: %s", lbARN)
+			}
 		} else if strings.Contains(lbARN, "net/") {
 			namespace = "AWS/NetworkELB"
 			requestMetric = "ActiveFlowCount"
 			bytesMetric = "ProcessedBytes"
 			dimensionName = "LoadBalancer"
-			// For NLB, we need to modify the ARN format
-			dimensionValue = strings.Join(strings.Split(lbARN, ":")[5:], ":")
+			// For NLB, we need to extract just the name part of the ARN
+			parts := strings.Split(lbARN, "/")
+			if len(parts) >= 3 {
+				dimensionValue = parts[len(parts)-2] + "/" + parts[len(parts)-1]
+			} else {
+				return nil, fmt.Errorf("invalid NLB ARN format: %s", lbARN)
+			}
 		}
 	case *elb.LoadBalancerDescription:
 		namespace = "AWS/ELB"
@@ -150,6 +160,22 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 	default:
 		return nil, fmt.Errorf("unknown load balancer type")
 	}
+
+	// Validate required fields
+	if namespace == "" || requestMetric == "" || dimensionName == "" || dimensionValue == "" {
+		return nil, fmt.Errorf("missing required metric configuration: namespace=%s, metric=%s, dimension=%s:%s",
+			namespace, requestMetric, dimensionName, dimensionValue)
+	}
+
+	logging.Debug("Getting load balancer metrics", map[string]interface{}{
+		"namespace":       namespace,
+		"request_metric":  requestMetric,
+		"bytes_metric":    bytesMetric,
+		"dimension_name":  dimensionName,
+		"dimension_value": dimensionValue,
+		"start_time":      startTime,
+		"end_time":        endTime,
+	})
 
 	// Get request metrics
 	requestInput := &cloudwatch.GetMetricStatisticsInput{
@@ -198,32 +224,29 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 	var requestPoints []float64
 
 	for _, point := range requestData.Datapoints {
-		totalRequests += aws.Float64Value(point.Sum)
-		requestPoints = append(requestPoints, aws.Float64Value(point.Sum))
+		if point.Sum != nil {
+			totalRequests += aws.Float64Value(point.Sum)
+			requestPoints = append(requestPoints, aws.Float64Value(point.Sum))
+		}
 	}
 
 	for _, point := range bytesData.Datapoints {
-		totalBytes += aws.Float64Value(point.Sum)
+		if point.Sum != nil {
+			totalBytes += aws.Float64Value(point.Sum)
+		}
 	}
 
-	// Calculate request deviation
-	var requestDeviation float64
-	if len(requestPoints) >= 2 {
-		mean := totalRequests / float64(len(requestPoints))
-		var sumSquares float64
-		for _, point := range requestPoints {
-			diff := point - mean
-			sumSquares += diff * diff
-		}
-		variance := sumSquares / float64(len(requestPoints))
-		requestDeviation = math.Sqrt(variance)
+	// Calculate average requests per hour
+	avgRequestsPerHour := 0.0
+	if len(requestPoints) > 0 {
+		avgRequestsPerHour = totalRequests / float64(len(requestPoints))
 	}
 
 	return map[string]interface{}{
-		"TotalRequests":    totalRequests,
-		"TotalBytesSent":   totalBytes,
-		"RequestDeviation": requestDeviation,
-		"ProcessedGB":      totalBytes / 1024 / 1024 / 1024, // Convert bytes to GB
+		"total_requests":        totalRequests,
+		"total_bytes":           totalBytes,
+		"avg_requests_per_hour": avgRequestsPerHour,
+		"datapoints_count":      len(requestData.Datapoints),
 	}, nil
 }
 
@@ -239,16 +262,11 @@ func (s *ELBScanner) isUnusedLoadBalancer(elbClient *elbv2.ELBV2, classicClient 
 		return true, "No resources attached"
 	}
 
-	totalRequests := metrics["TotalRequests"].(float64)
-	totalBytes := metrics["TotalBytesSent"].(float64)
-	requestDeviation := metrics["RequestDeviation"].(float64)
+	totalRequests := metrics["total_requests"].(float64)
+	totalBytes := metrics["total_bytes"].(float64)
 
 	if totalRequests == 0 && totalBytes == 0 {
 		return true, fmt.Sprintf("No traffic recorded during the threshold period of %d days", daysThreshold)
-	}
-
-	if requestDeviation < 0.1 {
-		return true, "Low traffic variation (low deviation)"
 	}
 
 	return false, ""
@@ -387,16 +405,16 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			ResourceID:   lbARN,
 			Reason:       reason,
 			Details: map[string]interface{}{
-				"account_id":        accountID,
-				"region":            opts.Region,
-				"type":              lbType,
-				"scheme":            aws.StringValue(lb.Scheme),
-				"vpc_id":            aws.StringValue(lb.VpcId),
-				"state":             aws.StringValue(lb.State.Code),
-				"total_requests":    metrics["TotalRequests"],
-				"total_bytes":       metrics["TotalBytesSent"],
-				"processed_gb":      metrics["ProcessedGB"],
-				"request_deviation": metrics["RequestDeviation"],
+				"account_id":            accountID,
+				"region":                opts.Region,
+				"type":                  lbType,
+				"scheme":                aws.StringValue(lb.Scheme),
+				"vpc_id":                aws.StringValue(lb.VpcId),
+				"state":                 aws.StringValue(lb.State.Code),
+				"total_requests":        metrics["total_requests"],
+				"total_bytes":           metrics["total_bytes"],
+				"avg_requests_per_hour": metrics["avg_requests_per_hour"],
+				"datapoints_count":      metrics["datapoints_count"],
 			},
 			Tags: tags,
 			Cost: map[string]interface{}{
@@ -475,15 +493,15 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			ResourceID:   lbName,
 			Reason:       reason,
 			Details: map[string]interface{}{
-				"account_id":        accountID,
-				"region":            opts.Region,
-				"type":              "classic",
-				"scheme":            aws.StringValue(lb.Scheme),
-				"vpc_id":            aws.StringValue(lb.VPCId),
-				"total_requests":    metrics["TotalRequests"],
-				"total_bytes":       metrics["TotalBytesSent"],
-				"processed_gb":      metrics["ProcessedGB"],
-				"request_deviation": metrics["RequestDeviation"],
+				"account_id":            accountID,
+				"region":                opts.Region,
+				"type":                  "classic",
+				"scheme":                aws.StringValue(lb.Scheme),
+				"vpc_id":                aws.StringValue(lb.VPCId),
+				"total_requests":        metrics["total_requests"],
+				"total_bytes":           metrics["total_bytes"],
+				"avg_requests_per_hour": metrics["avg_requests_per_hour"],
+				"datapoints_count":      metrics["datapoints_count"],
 			},
 			Tags: tags,
 			Cost: map[string]interface{}{
