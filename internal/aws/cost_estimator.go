@@ -88,6 +88,69 @@ var regionToLocation = map[string]string{
 	"cn-northwest-1": "China (Ningxia)",
 }
 
+// Static prices for EBS snapshots per GB-month
+var ebsSnapshotPrices = map[string]float64{
+	// US Regions
+	"us-east-1":      0.05,  // N. Virginia
+	"us-east-2":      0.05,  // Ohio
+	"us-west-1":      0.05,  // N. California
+	"us-west-2":      0.05,  // Oregon
+	
+	// Canada
+	"ca-central-1":   0.055, // Canada Central
+	
+	// South America
+	"sa-east-1":      0.066, // São Paulo
+	
+	// Europe
+	"eu-central-1":   0.054, // Frankfurt
+	"eu-central-2":   0.054, // Zurich
+	"eu-west-1":      0.05,  // Ireland
+	"eu-west-2":      0.051, // London
+	"eu-west-3":      0.053, // Paris
+	"eu-north-1":     0.048, // Stockholm
+	"eu-south-1":     0.053, // Milan
+	"eu-south-2":     0.053, // Spain
+	
+	// Africa
+	"af-south-1":     0.055, // Cape Town
+	
+	// Middle East
+	"me-central-1":   0.055, // UAE
+	"me-south-1":     0.055, // Bahrain
+	
+	// Asia Pacific
+	"ap-east-1":      0.052, // Hong Kong
+	"ap-south-1":     0.053, // Mumbai
+	"ap-south-2":     0.053, // Hyderabad
+	"ap-southeast-1": 0.05,  // Singapore
+	"ap-southeast-2": 0.055, // Sydney
+	"ap-southeast-3": 0.055, // Jakarta
+	"ap-southeast-4": 0.055, // Melbourne
+	"ap-northeast-1": 0.05,  // Tokyo
+	"ap-northeast-2": 0.05,  // Seoul
+	"ap-northeast-3": 0.05,  // Osaka
+}
+
+// Static prices for RDS instances per hour
+var rdsInstancePrices = map[string]map[string]float64{
+	// db.t3.medium prices by region
+	"db.t3.medium": {
+		"us-east-1":      0.068,  // N. Virginia
+		"us-east-2":      0.068,  // Ohio
+		"us-west-1":      0.076,  // N. California
+		"us-west-2":      0.068,  // Oregon
+		"ca-central-1":   0.076,  // Canada
+		"eu-central-1":   0.076,  // Frankfurt
+		"eu-west-1":      0.068,  // Ireland
+		"eu-west-2":      0.076,  // London
+		"ap-southeast-1": 0.076,  // Singapore
+		"ap-southeast-2": 0.076,  // Sydney
+		"ap-northeast-1": 0.084,  // Tokyo
+	},
+	// Add more instance types as needed
+}
+
 // CostEstimator handles AWS resource cost calculations with caching
 type CostEstimator struct {
 	pricingClient *pricing.Pricing
@@ -242,7 +305,13 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 	// Get location name for pricing API
 	location, ok := regionToLocation[region]
 	if !ok {
-		return 0, fmt.Errorf("unknown region: %s", region)
+		// If region is not found, default to us-east-1
+		logging.Debug("Unknown region, defaulting to us-east-1", map[string]interface{}{
+			"region":         region,
+			"default_region": "us-east-1",
+		})
+		region = "us-east-1"
+		location = regionToLocation["us-east-1"]
 	}
 
 	var filters []*pricing.Filter
@@ -323,45 +392,34 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			},
 		}
 	case "EBSSnapshots":
-		_, ok := config.ResourceSize.(int64)
+		size, ok := config.ResourceSize.(int64)
 		if !ok {
 			return 0, fmt.Errorf("invalid resource size type for %s: %T", resourceType, config.ResourceSize)
 		}
 
-		filters = []*pricing.Filter{
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("servicecode"),
-				Value: aws.String("AmazonEC2"),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("productFamily"),
-				Value: aws.String("Storage"),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("location"),
-				Value: aws.String(location),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("usagetype"),
-				Value: aws.String("EBS:SnapshotUsage"),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("volumeType"),
-				Value: aws.String("Snapshot"),
-			},
+		// Get price per GB-month for the region
+		pricePerGB, ok := ebsSnapshotPrices[region]
+		if !ok {
+			// Default to us-east-1 pricing if region not found
+			pricePerGB = ebsSnapshotPrices["us-east-1"]
+			logging.Debug("Using default pricing for region", map[string]interface{}{
+				"region":           region,
+				"default_region":   "us-east-1",
+				"price_per_gb":    pricePerGB,
+			})
 		}
 
-		logging.Debug("Fetching snapshot pricing", map[string]interface{}{
-			"region":      region,
-			"volume_type": config.VolumeType,
-			"size":        config.ResourceSize,
-			"filters":     filters,
-		})
+		// Calculate total price based on size
+		sizeGB := float64(size)
+		totalPrice := sizeGB * pricePerGB
+
+		// Cache the calculated price
+		cacheKey := fmt.Sprintf("%s:%s:%v", resourceType, region, size)
+		ce.cacheLock.Lock()
+		ce.priceCache[cacheKey] = totalPrice
+		ce.cacheLock.Unlock()
+
+		return totalPrice, nil
 	case "elb":
 		filters = []*pricing.Filter{
 			{
@@ -603,13 +661,49 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		ce.cacheLock.Unlock()
 
 		return totalCost, nil
+	case "RDS":
+		// Get instance type from the details
+		instanceType, ok := config.ResourceSize.(string)
+		if !ok {
+			instanceType = "db.t3.medium" // Default to t3.medium if not specified
+			logging.Debug("Using default instance type", map[string]interface{}{
+				"default_type": instanceType,
+			})
+		}
+
+		// Get pricing for instance type
+		instancePrices, ok := rdsInstancePrices[instanceType]
+		if !ok {
+			// If instance type not found, default to db.t3.medium
+			instanceType = "db.t3.medium"
+			instancePrices = rdsInstancePrices[instanceType]
+			logging.Debug("Instance type not found, using default", map[string]interface{}{
+				"requested_type": config.ResourceSize,
+				"default_type":   instanceType,
+			})
+		}
+
+		// Get price for region
+		price, ok := instancePrices[region]
+		if !ok {
+			// Default to us-east-1 pricing if region not found
+			price = instancePrices["us-east-1"]
+			logging.Debug("Region not found, using default pricing", map[string]interface{}{
+				"region":         region,
+				"default_region": "us-east-1",
+				"price":         price,
+			})
+		}
+
+		// Cache the price
+		ce.cacheLock.Lock()
+		ce.priceCache[cacheKey] = price
+		ce.cacheLock.Unlock()
+
+		return price, nil
 	case "ElasticIP":
 		// Elastic IPs have a flat rate of $0.005 per hour when not attached
 		hourlyRate := roundCost(0.005) // $0.005 per hour
-		return hourlyRate, nil
-	case "RDS":
-		// RDS has a flat rate of $0.005 per hour when not attached
-		hourlyRate := 0.005 // $0.005 per hour
 		return hourlyRate, nil
 	default:
 		cacheKey = fmt.Sprintf("%s:%s", resourceType, region)
@@ -910,6 +1004,21 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 		}, nil
 	case "OpenSearch":
 		// For OpenSearch, price is already per hour
+		hourlyPrice = pricePerUnit
+		dailyPrice := hourlyPrice * 24
+		monthlyPrice := dailyPrice * 30 // Approximate
+		yearlyPrice := dailyPrice * 365
+
+		return &CostBreakdown{
+			HourlyRate:   roundCost(hourlyPrice),
+			DailyRate:    roundCost(dailyPrice),
+			MonthlyRate:  roundCost(monthlyPrice),
+			YearlyRate:   roundCost(yearlyPrice),
+			HoursRunning: nil, // Hours running should be stored in details
+			Lifetime:     nil, // Lifetime will be calculated by the application
+		}, nil
+	case "RDS":
+		// For RDS, price is already per hour
 		hourlyPrice = pricePerUnit
 		dailyPrice := hourlyPrice * 24
 		monthlyPrice := dailyPrice * 30 // Approximate
