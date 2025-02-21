@@ -146,10 +146,10 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 					ResourceType: s.Label(),
 					ResourceName: resourceName,
 					ResourceID:   allocationID,
+					Region:       opts.Region,
 					Reason:       "Not associated with any resource (EC2 Instance, Network Interface, or NAT Gateway)",
 					Details: map[string]interface{}{
 						"account_id":               accountID,
-						"region":                   opts.Region,
 						"public_ip":                publicIP,
 						"allocation_id":            allocationID,
 						"domain":                   aws.StringValue(addr.Domain),

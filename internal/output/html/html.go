@@ -162,16 +162,13 @@ func processResults(results []aws.ScanResult) TemplateData {
 		// Extract account ID and region
 		accountID := ""
 		accountName := ""
-		region := ""
+		region := result.Region
 
 		if details, ok := result.Details["account_id"].(string); ok {
 			accountID = details
 		}
 		if details, ok := result.Details["account_name"].(string); ok {
 			accountName = details
-		}
-		if details, ok := result.Details["region"].(string); ok {
-			region = details
 		}
 
 		// Update account mappings

@@ -402,6 +402,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 					// Build result details with all available attributes
 					details := map[string]interface{}{
+						"account_id":         accountID,
 						"architecture":       aws.StringValue(instance.Architecture),
 						"ami_id":             aws.StringValue(instance.ImageId),
 						"instance_id":        aws.StringValue(instance.InstanceId),
@@ -519,6 +520,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						ResourceType: s.Label(),
 						ResourceName: resourceName,
 						ResourceID:   aws.StringValue(instance.InstanceId),
+						Region:       opts.Region,
 						Details:      details,
 						Tags:         tags,
 						Cost:         costs,

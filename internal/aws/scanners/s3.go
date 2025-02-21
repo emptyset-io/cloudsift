@@ -219,7 +219,6 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		if len(reasons) > 0 {
 			details := map[string]interface{}{
 				"ObjectCount":     currentObjectCount,
-				"Region":         bucketRegion,
 				"BucketSizeBytes": metrics["bucket_size"],
 				"GetRequests":     metrics["get_requests"],
 				"PutRequests":     metrics["put_requests"],
@@ -248,6 +247,7 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				ResourceType: s.Label(),
 				ResourceName: bucketName,
 				ResourceID:   fmt.Sprintf("arn:aws:s3:::%s", bucketName),
+				Region:       bucketRegion,
 				Reason:       strings.Join(reasons, "\n"),
 				Details:      details,
 			}

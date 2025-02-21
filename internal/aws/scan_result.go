@@ -5,6 +5,7 @@ type ScanResult struct {
 	ResourceType string                 `json:"resource_type"`
 	ResourceName string                 `json:"resource_name"`
 	ResourceID   string                 `json:"resource_id"`
+	Region       string                 `json:"region"`
 	Reason       string                 `json:"reason"`
 	Tags         map[string]string      `json:"tags"`
 	Details      map[string]interface{} `json:"details"`
