@@ -37,7 +37,7 @@ func (s *ElasticIPScanner) Label() string {
 }
 
 // checkNATGatewayAssociation checks if an Elastic IP is associated with a NAT Gateway
-func (s *ElasticIPScanner) checkNATGatewayAssociation(ec2Client *ec2.EC2, allocationID string) bool {
+func (s *ElasticIPScanner) checkNATGatewayAssociation(clients *utils.ServiceClients, allocationID string) bool {
 	if allocationID == "" {
 		logging.Debug("No Allocation ID provided for NAT Gateway association check", nil)
 		return false
@@ -50,7 +50,7 @@ func (s *ElasticIPScanner) checkNATGatewayAssociation(ec2Client *ec2.EC2, alloca
 	input := &ec2.DescribeNatGatewaysInput{}
 	var isAssociated bool
 
-	err := ec2Client.DescribeNatGatewaysPages(input,
+	err := clients.EC2.DescribeNatGatewaysPages(input,
 		func(page *ec2.DescribeNatGatewaysOutput, lastPage bool) bool {
 			for _, natGateway := range page.NatGateways {
 				for _, address := range natGateway.NatGatewayAddresses {
@@ -92,11 +92,11 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create EC2 client
-	ec2Client := ec2.New(sess)
+	// Create service clients
+	clients := utils.CreateServiceClients(sess)
 
 	// Get Elastic IPs
-	addresses, err := ec2Client.DescribeAddresses(&ec2.DescribeAddressesInput{})
+	addresses, err := clients.EC2.DescribeAddresses(&ec2.DescribeAddressesInput{})
 	if err != nil {
 		logging.Error("Failed to describe addresses", err, nil)
 		return nil, fmt.Errorf("failed to describe addresses: %w", err)
@@ -125,7 +125,7 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 		// Check if the Elastic IP is not associated with any resource
 		if aws.StringValue(addr.InstanceId) == "" && aws.StringValue(addr.NetworkInterfaceId) == "" {
-			if !s.checkNATGatewayAssociation(ec2Client, allocationID) {
+			if !s.checkNATGatewayAssociation(clients, allocationID) {
 				// Calculate costs - Elastic IPs have a flat rate of $0.005 per hour when not attached
 				costs, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
 					ResourceType: "ElasticIP",

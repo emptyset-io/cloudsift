@@ -55,8 +55,9 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create EC2 service client
-	svc := ec2.New(sess)
+	// Create service clients
+	clients := utils.CreateServiceClients(sess)
+
 	input := &ec2.DescribeSnapshotsInput{
 		OwnerIds: []*string{aws.String("self")},
 	}
@@ -64,7 +65,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	var results awslib.ScanResults
 	volumeSnapshots := make(map[string][]string)
 
-	err = svc.DescribeSnapshotsPages(input, func(page *ec2.DescribeSnapshotsOutput, lastPage bool) bool {
+	err = clients.EC2.DescribeSnapshotsPages(input, func(page *ec2.DescribeSnapshotsOutput, lastPage bool) bool {
 		for _, snapshot := range page.Snapshots {
 			// Calculate age of snapshot
 			age := time.Since(*snapshot.StartTime)
@@ -96,7 +97,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				volumeInput := &ec2.DescribeVolumesInput{
 					VolumeIds: []*string{snapshot.VolumeId},
 				}
-				volumeOutput, err := svc.DescribeVolumes(volumeInput)
+				volumeOutput, err := clients.EC2.DescribeVolumes(volumeInput)
 				if err == nil && len(volumeOutput.Volumes) > 0 {
 					volumeType = aws.StringValue(volumeOutput.Volumes[0].VolumeType)
 				}

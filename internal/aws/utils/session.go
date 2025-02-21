@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/opensearchservice"
 	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
@@ -17,6 +18,7 @@ type ServiceClients struct {
 	S3         *s3.S3
 	CloudWatch *cloudwatch.CloudWatch
 	RDS        *rds.RDS
+	OpenSearch *opensearchservice.OpenSearchService
 }
 
 // GetAccountID retrieves the AWS account ID for the current session
@@ -39,5 +41,6 @@ func CreateServiceClients(sess *session.Session) *ServiceClients {
 		S3:         s3.New(sess),
 		CloudWatch: cloudwatch.New(sess),
 		RDS:        rds.New(sess),
+		OpenSearch: opensearchservice.New(sess),
 	}
 }

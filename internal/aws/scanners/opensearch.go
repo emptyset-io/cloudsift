@@ -10,7 +10,6 @@ import (
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/opensearchservice"
 )
 
@@ -39,7 +38,7 @@ func (s *OpenSearchScanner) Label() string {
 }
 
 // getClusterMetrics retrieves CloudWatch metrics for an OpenSearch cluster
-func (s *OpenSearchScanner) getClusterMetrics(cwClient *cloudwatch.CloudWatch, domainName string, startTime, endTime time.Time) (map[string]float64, error) {
+func (s *OpenSearchScanner) getClusterMetrics(clients *utils.ServiceClients, domainName string, startTime, endTime time.Time) (map[string]float64, error) {
 	metrics := []utils.MetricConfig{
 		{
 			Namespace:     "AWS/ES",
@@ -106,7 +105,7 @@ func (s *OpenSearchScanner) getClusterMetrics(cwClient *cloudwatch.CloudWatch, d
 		},
 	}
 
-	results, err := utils.GetResourceMetricsData(cwClient, metrics)
+	results, err := utils.GetResourceMetricsData(clients.CloudWatch, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metrics: %w", err)
 	}
@@ -184,8 +183,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 	}
 
 	// Create service clients
-	esClient := opensearchservice.New(sess)
-	cwClient := cloudwatch.New(sess)
+	clients := utils.CreateServiceClients(sess)
 
 	// Get all OpenSearch domains
 	var results awslib.ScanResults
@@ -193,7 +191,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
 
 	// List all domains
-	listOutput, err := esClient.ListDomainNames(&opensearchservice.ListDomainNamesInput{})
+	listOutput, err := clients.OpenSearch.ListDomainNames(&opensearchservice.ListDomainNamesInput{})
 	if err != nil {
 		logging.Error("Failed to list OpenSearch domains", err, nil)
 		return nil, fmt.Errorf("failed to list OpenSearch domains: %w", err)
@@ -207,7 +205,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		})
 
 		// Get domain details
-		describeOutput, err := esClient.DescribeDomain(&opensearchservice.DescribeDomainInput{
+		describeOutput, err := clients.OpenSearch.DescribeDomain(&opensearchservice.DescribeDomainInput{
 			DomainName: aws.String(domainName),
 		})
 		if err != nil {
@@ -220,7 +218,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		status := describeOutput.DomainStatus
 
 		// Get cluster metrics
-		metrics, err := s.getClusterMetrics(cwClient, domainName, startTime, endTime)
+		metrics, err := s.getClusterMetrics(clients, domainName, startTime, endTime)
 		if err != nil {
 			logging.Error("Failed to get cluster metrics", err, map[string]interface{}{
 				"domain_name": domainName,

@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/iam"
+	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 var (
@@ -30,12 +31,13 @@ var (
 
 // IAMUserScanner scans for unused IAM users
 type IAMUserScanner struct {
-	client  *iam.IAM
 	limiter *ratelimit.ServiceLimiter
 }
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{}); err != nil {
+	if err := awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{
+		limiter: ratelimit.GetServiceLimiter("iam"),
+	}); err != nil {
 		panic(fmt.Sprintf("Failed to register IAM User scanner: %v", err))
 	}
 }
@@ -56,9 +58,10 @@ func (s *IAMUserScanner) Label() string {
 }
 
 // getLastConsoleLogin gets the last console login time for a user
-func (s *IAMUserScanner) getLastConsoleLogin(ctx context.Context, userName string) (*time.Time, error) {
+func (s *IAMUserScanner) getLastConsoleLogin(ctx context.Context, sess *session.Session, userName string) (*time.Time, error) {
+	client := iam.New(sess)
 	err := s.limiter.Execute(ctx, "GetLoginProfile", func() error {
-		_, err := s.client.GetLoginProfileWithContext(ctx, &iam.GetLoginProfileInput{
+		_, err := client.GetLoginProfileWithContext(ctx, &iam.GetLoginProfileInput{
 			UserName: aws.String(userName),
 		})
 		return err
@@ -75,10 +78,11 @@ func (s *IAMUserScanner) getLastConsoleLogin(ctx context.Context, userName strin
 }
 
 // getLastKeyUsage gets the last time any access key was used for a user
-func (s *IAMUserScanner) getLastKeyUsage(ctx context.Context, userName string) (*time.Time, error) {
+func (s *IAMUserScanner) getLastKeyUsage(ctx context.Context, sess *session.Session, userName string) (*time.Time, error) {
+	client := iam.New(sess)
 	var accessKeys []*iam.AccessKeyMetadata
 	err := s.limiter.Execute(ctx, "ListAccessKeys", func() error {
-		result, err := s.client.ListAccessKeysWithContext(ctx, &iam.ListAccessKeysInput{
+		result, err := client.ListAccessKeysWithContext(ctx, &iam.ListAccessKeysInput{
 			UserName: aws.String(userName),
 		})
 		if err != nil {
@@ -96,7 +100,7 @@ func (s *IAMUserScanner) getLastKeyUsage(ctx context.Context, userName string) (
 		var keyUsage *iam.GetAccessKeyLastUsedOutput
 		err := s.limiter.Execute(ctx, "GetAccessKeyLastUsed", func() error {
 			var err error
-			keyUsage, err = s.client.GetAccessKeyLastUsedWithContext(ctx, &iam.GetAccessKeyLastUsedInput{
+			keyUsage, err = client.GetAccessKeyLastUsedWithContext(ctx, &iam.GetAccessKeyLastUsedInput{
 				AccessKeyId: key.AccessKeyId,
 			})
 			return err
@@ -181,17 +185,16 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 	scannedAccounts.Unlock()
 
 	// Initialize scanner
-	s.client = iam.New(sess)
-	s.limiter = ratelimit.GetServiceLimiter("iam")
 	ctx := context.Background()
 
 	// Get all IAM users
 	var users []*iam.User
 	var marker *string
 
+	client := iam.New(sess)
 	for {
 		err := s.limiter.Execute(ctx, "ListUsers", func() error {
-			output, err := s.client.ListUsersWithContext(ctx, &iam.ListUsersInput{
+			output, err := client.ListUsersWithContext(ctx, &iam.ListUsersInput{
 				Marker: marker,
 			})
 			if err != nil {
@@ -228,7 +231,7 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			})
 
 			// Get last login time and key usage time
-			lastLoginTime, err := s.getLastConsoleLogin(ctx, userName)
+			lastLoginTime, err := s.getLastConsoleLogin(ctx, sess, userName)
 			if err != nil {
 				logging.Error("Failed to get last console login", err, map[string]interface{}{
 					"user_name": userName,
@@ -236,7 +239,7 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 				return nil
 			}
 
-			keyLastUsedTime, err := s.getLastKeyUsage(ctx, userName)
+			keyLastUsedTime, err := s.getLastKeyUsage(ctx, sess, userName)
 			if err != nil {
 				logging.Error("Failed to get key usage time", err, map[string]interface{}{
 					"user_name": userName,

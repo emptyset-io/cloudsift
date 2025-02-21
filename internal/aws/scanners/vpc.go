@@ -36,7 +36,7 @@ func (s *VPCScanner) Label() string {
 }
 
 // getVPCResourceCount counts the number of EC2 instances in a VPC
-func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int, error) {
+func (s *VPCScanner) getVPCResourceCount(clients *utils.ServiceClients, vpcID string) (int, error) {
 	input := &ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -47,7 +47,7 @@ func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int,
 	}
 
 	var instanceCount int
-	err := ec2Client.DescribeInstancesPages(input, func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
+	err := clients.EC2.DescribeInstancesPages(input, func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
 		for _, reservation := range page.Reservations {
 			instanceCount += len(reservation.Instances)
 		}
@@ -80,12 +80,12 @@ func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create EC2 service client
-	ec2Client := ec2.New(sess)
+	// Create service clients
+	clients := utils.CreateServiceClients(sess)
 
 	// Describe VPCs
 	input := &ec2.DescribeVpcsInput{}
-	vpcs, err := ec2Client.DescribeVpcs(input)
+	vpcs, err := clients.EC2.DescribeVpcs(input)
 	if err != nil {
 		logging.Error("Failed to describe VPCs", err, nil)
 		return nil, fmt.Errorf("failed to describe VPCs: %w", err)
@@ -119,7 +119,7 @@ func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		}
 
 		// Count resources in VPC
-		resourceCount, err := s.getVPCResourceCount(ec2Client, vpcID)
+		resourceCount, err := s.getVPCResourceCount(clients, vpcID)
 		if err != nil {
 			logging.Error("Failed to get VPC resource count", err, map[string]interface{}{
 				"vpc_id": vpcID,

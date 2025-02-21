@@ -59,12 +59,11 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 	// Create service clients
 	clients := utils.CreateServiceClients(sess)
-	svc := ec2.New(sess) // Keep direct EC2 client for backward compatibility
 
 	input := &ec2.DescribeVolumesInput{}
 
 	var results awslib.ScanResults
-	err = svc.DescribeVolumesPages(input, func(page *ec2.DescribeVolumesOutput, lastPage bool) bool {
+	err = clients.EC2.DescribeVolumesPages(input, func(page *ec2.DescribeVolumesOutput, lastPage bool) bool {
 		for _, volume := range page.Volumes {
 			// Calculate age of volume
 			age := time.Since(*volume.CreateTime)

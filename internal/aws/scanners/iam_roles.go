@@ -14,13 +14,13 @@ import (
 	"cloudsift/internal/worker"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/iam"
 )
 
 // IAMRoleScanner scans for unused IAM roles
 type IAMRoleScanner struct {
 	limiter *ratelimit.ServiceLimiter
-	client  *iam.IAM
 }
 
 func init() {
@@ -52,11 +52,12 @@ func (s *IAMRoleScanner) isReservedRole(roleARN string) bool {
 }
 
 // getRoleLastUsed retrieves the last used time for a role
-func (s *IAMRoleScanner) getRoleLastUsed(ctx context.Context, roleName string) (*time.Time, error) {
+func (s *IAMRoleScanner) getRoleLastUsed(ctx context.Context, sess *session.Session, roleName string) (*time.Time, error) {
 	var result *iam.GetRoleOutput
 	err := s.limiter.Execute(ctx, "GetRole", func() error {
+		iamClient := iam.New(sess)
 		var err error
-		result, err = s.client.GetRoleWithContext(ctx, &iam.GetRoleInput{
+		result, err = iamClient.GetRoleWithContext(ctx, &iam.GetRoleInput{
 			RoleName: aws.String(roleName),
 		})
 		return err
@@ -74,14 +75,15 @@ func (s *IAMRoleScanner) getRoleLastUsed(ctx context.Context, roleName string) (
 }
 
 // getRolePolicies retrieves the attached policies, inline policies, and instance profiles for the role
-func (s *IAMRoleScanner) getRolePolicies(ctx context.Context, roleName string) ([]*iam.AttachedPolicy, []string, []*iam.InstanceProfile, error) {
+func (s *IAMRoleScanner) getRolePolicies(ctx context.Context, sess *session.Session, roleName string) ([]*iam.AttachedPolicy, []string, []*iam.InstanceProfile, error) {
 	var attachedPolicies []*iam.AttachedPolicy
 	var inlinePolicies []string
 	var instanceProfiles []*iam.InstanceProfile
 
 	// Get attached policies
 	err := s.limiter.Execute(ctx, "ListAttachedRolePolicies", func() error {
-		return s.client.ListAttachedRolePoliciesPagesWithContext(ctx, &iam.ListAttachedRolePoliciesInput{
+		iamClient := iam.New(sess)
+		return iamClient.ListAttachedRolePoliciesPagesWithContext(ctx, &iam.ListAttachedRolePoliciesInput{
 			RoleName: aws.String(roleName),
 		}, func(page *iam.ListAttachedRolePoliciesOutput, lastPage bool) bool {
 			attachedPolicies = append(attachedPolicies, page.AttachedPolicies...)
@@ -94,7 +96,8 @@ func (s *IAMRoleScanner) getRolePolicies(ctx context.Context, roleName string) (
 
 	// Get inline policies
 	err = s.limiter.Execute(ctx, "ListRolePolicies", func() error {
-		return s.client.ListRolePoliciesPagesWithContext(ctx, &iam.ListRolePoliciesInput{
+		iamClient := iam.New(sess)
+		return iamClient.ListRolePoliciesPagesWithContext(ctx, &iam.ListRolePoliciesInput{
 			RoleName: aws.String(roleName),
 		}, func(page *iam.ListRolePoliciesOutput, lastPage bool) bool {
 			inlinePolicies = append(inlinePolicies, aws.StringValueSlice(page.PolicyNames)...)
@@ -107,7 +110,8 @@ func (s *IAMRoleScanner) getRolePolicies(ctx context.Context, roleName string) (
 
 	// Get instance profiles
 	err = s.limiter.Execute(ctx, "ListInstanceProfilesForRole", func() error {
-		return s.client.ListInstanceProfilesForRolePagesWithContext(ctx, &iam.ListInstanceProfilesForRoleInput{
+		iamClient := iam.New(sess)
+		return iamClient.ListInstanceProfilesForRolePagesWithContext(ctx, &iam.ListInstanceProfilesForRoleInput{
 			RoleName: aws.String(roleName),
 		}, func(page *iam.ListInstanceProfilesForRoleOutput, lastPage bool) bool {
 			instanceProfiles = append(instanceProfiles, page.InstanceProfiles...)
@@ -168,7 +172,7 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	ctx := context.Background()
 
-	// Create base sess, err := awslib.GetScannerSession(opts)ion with region
+	// Create base session with region
 	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
@@ -185,9 +189,6 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create IAM client
-	s.client = iam.New(sess)
-
 	// Get all IAM roles
 	var roles []*iam.Role
 	var marker *string
@@ -195,7 +196,8 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 	// List all roles with rate limiting
 	for {
 		err := s.limiter.Execute(ctx, "ListRoles", func() error {
-			output, err := s.client.ListRolesWithContext(ctx, &iam.ListRolesInput{
+			iamClient := iam.New(sess)
+			output, err := iamClient.ListRolesWithContext(ctx, &iam.ListRolesInput{
 				Marker: marker,
 			})
 			if err != nil {
@@ -242,7 +244,7 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			})
 
 			// Get last used time
-			lastUsedTime, err := s.getRoleLastUsed(ctx, roleName)
+			lastUsedTime, err := s.getRoleLastUsed(ctx, sess, roleName)
 			if err != nil {
 				logging.Error("Failed to get role last used", err, map[string]interface{}{
 					"role_name": roleName,
@@ -251,7 +253,7 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			}
 
 			// Get policies and instance profiles
-			attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(ctx, roleName)
+			attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(ctx, sess, roleName)
 			if err != nil {
 				logging.Error("Failed to get role policies", err, map[string]interface{}{
 					"role_name": roleName,
