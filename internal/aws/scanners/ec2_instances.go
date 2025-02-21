@@ -193,15 +193,15 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	var sess *session.Session
 	var err error
 	if opts.OrganizationRole != "" && opts.Role != "" {
-		sess, err = awslib.AssumeRoleFromOrganization(opts.AccountID, opts.OrganizationRole, opts.Role, nil)
+		sess, err = awslib.AssumeRoleFromOrganization(opts.AccountID, opts.OrganizationRole, opts.Role, nil, opts.Region)
 	} else {
 		sess, err = awslib.GetSession(opts.Role, opts.Region)
 	}
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": opts.Region,
-			"role":   opts.Role,
-			"org_role": opts.OrganizationRole,
+			"region":     opts.Region,
+			"role":       opts.Role,
+			"org_role":   opts.OrganizationRole,
 			"account_id": opts.AccountID,
 		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
