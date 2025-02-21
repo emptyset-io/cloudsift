@@ -55,43 +55,29 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
-	// If no roles specified, return base session
-	if opts.Role == "" {
-		return sess, nil
-	}
-
 	// If organization role is set, assume it first
 	if opts.OrganizationRole != "" {
-		// First assume the organization role
 		orgSess, err := AssumeRole("", opts.OrganizationRole, sess)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assume organization role: %w", err)
 		}
-
-		// Get current account ID for target role ARN
-		svc := sts.New(orgSess)
-		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller identity: %w", err)
-		}
-
-		// Now assume the scanner role from the organization role session
-		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
-		creds := stscreds.NewCredentials(orgSess, roleARN)
-		return session.NewSession(cfg.WithCredentials(creds))
+		sess = orgSess
 	}
 
-	// If no organization role, assume scanner role directly
+	// If no scanner role specified, return current session
+	if opts.Role == "" {
+		return sess, nil
+	}
+
+	// Get current account ID for target role ARN
 	svc := sts.New(sess)
 	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Construct role ARN
+	// Now assume the scanner role from the current session
 	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
-
-	// Create new session with assumed role
 	creds := stscreds.NewCredentials(sess, roleARN)
 	return session.NewSession(cfg.WithCredentials(creds))
 }
