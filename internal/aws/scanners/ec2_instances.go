@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/sts"
 )
 
 // EC2InstanceScanner scans for EC2 instances
@@ -41,6 +42,17 @@ func (s *EC2InstanceScanner) Label() string {
 
 // fetchMetric gets CloudWatch metrics for a given resource
 func (s *EC2InstanceScanner) fetchMetric(clients *utils.ServiceClients, namespace, resourceID, dimensionName, metricName, stat string, startTime, endTime time.Time) ([]float64, error) {
+	// Log metric request
+	logging.Debug("Fetching CloudWatch metric", map[string]interface{}{
+		"namespace":      namespace,
+		"resource_id":    resourceID,
+		"dimension_name": dimensionName,
+		"metric_name":    metricName,
+		"statistic":      stat,
+		"start_time":     startTime,
+		"end_time":       endTime,
+	})
+
 	// Ensure start time is before end time and they're not equal
 	if startTime.Equal(endTime) {
 		startTime = startTime.Add(-1 * time.Hour)
@@ -84,12 +96,40 @@ func (s *EC2InstanceScanner) fetchMetric(clients *utils.ServiceClients, namespac
 		EndTime:   aws.Time(config.EndTime),
 	}
 
+	// Test CloudWatch permissions first
+	_, err := clients.CloudWatch.ListMetrics(&cloudwatch.ListMetricsInput{
+		Namespace: aws.String(namespace),
+	})
+	if err != nil {
+		logging.Error("Failed to test CloudWatch permissions", err, map[string]interface{}{
+			"namespace":      namespace,
+			"resource_id":    resourceID,
+			"dimension_name": dimensionName,
+			"metric_name":    metricName,
+		})
+		return nil, fmt.Errorf("failed to test CloudWatch permissions: %w", err)
+	}
+
 	result, err := clients.CloudWatch.GetMetricData(input)
 	if err != nil {
+		logging.Error("Failed to get metric data", err, map[string]interface{}{
+			"namespace":      namespace,
+			"resource_id":    resourceID,
+			"dimension_name": dimensionName,
+			"metric_name":    metricName,
+			"statistic":      stat,
+		})
 		return nil, err
 	}
 
 	if len(result.MetricDataResults) == 0 || len(result.MetricDataResults[0].Values) == 0 {
+		logging.Debug("No metric data found", map[string]interface{}{
+			"namespace":      namespace,
+			"resource_id":    resourceID,
+			"dimension_name": dimensionName,
+			"metric_name":    metricName,
+			"statistic":      stat,
+		})
 		return []float64{}, nil
 	}
 
@@ -97,6 +137,15 @@ func (s *EC2InstanceScanner) fetchMetric(clients *utils.ServiceClients, namespac
 	for i, v := range result.MetricDataResults[0].Values {
 		values[i] = aws.Float64Value(v)
 	}
+
+	logging.Debug("Successfully fetched metric data", map[string]interface{}{
+		"namespace":      namespace,
+		"resource_id":    resourceID,
+		"dimension_name": dimensionName,
+		"metric_name":    metricName,
+		"statistic":      stat,
+		"values_count":   len(values),
+	})
 
 	return values, nil
 }
@@ -188,25 +237,60 @@ func (s *EC2InstanceScanner) getEBSVolumes(clients *utils.ServiceClients, instan
 
 // Scan implements Scanner interface
 func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
+	// Log scan options
+	logging.Debug("Starting EC2 instance scan with options", map[string]interface{}{
+		"region":            opts.Region,
+		"role":             opts.Role,
+		"organization_role": opts.OrganizationRole,
+		"days_unused":      opts.DaysUnused,
+	})
+
 	// Create base session
 	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": opts.Region,
-			"role":   opts.Role,
+			"region":            opts.Region,
+			"role":             opts.Role,
+			"organization_role": opts.OrganizationRole,
 		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
 	// Get current account ID and create service clients
-	accountID, err := utils.GetAccountID(sess)
+	svc := sts.New(sess)
+	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
+		logging.Error("Failed to get caller identity", err, map[string]interface{}{
+			"region":            opts.Region,
+			"role":             opts.Role,
+			"organization_role": opts.OrganizationRole,
+		})
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
+	// Log the identity we're running as
+	logging.Debug("Running as identity", map[string]interface{}{
+		"account_id": aws.StringValue(identity.Account),
+		"arn":       aws.StringValue(identity.Arn),
+		"user_id":   aws.StringValue(identity.UserId),
+	})
+
 	// Create service clients
 	clients := utils.CreateServiceClients(sess)
+
+	// Test EC2 permissions
+	_, err = clients.EC2.DescribeInstances(&ec2.DescribeInstancesInput{MaxResults: aws.Int64(5)})
+	if err != nil {
+		logging.Error("Failed to test EC2 permissions", err, map[string]interface{}{
+			"account_id":        aws.StringValue(identity.Account),
+			"arn":              aws.StringValue(identity.Arn),
+			"user_id":          aws.StringValue(identity.UserId),
+			"region":           opts.Region,
+			"role":            opts.Role,
+			"organization_role": opts.OrganizationRole,
+		})
+		return nil, fmt.Errorf("failed to test EC2 permissions: %w", err)
+	}
 
 	// Get instances
 	var results awslib.ScanResults
@@ -290,7 +374,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						})
 						if err != nil {
 							logging.Error("Failed to calculate instance costs", err, map[string]interface{}{
-								"account_id":    accountID,
+								"account_id":    aws.StringValue(identity.Account),
 								"region":        opts.Region,
 								"resource_name": resourceName,
 								"resource_id":   aws.StringValue(instance.InstanceId),
@@ -319,7 +403,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 								})
 								if err != nil {
 									logging.Error("Failed to calculate EBS costs", err, map[string]interface{}{
-										"account_id":    accountID,
+										"account_id":    aws.StringValue(identity.Account),
 										"region":        opts.Region,
 										"resource_name": resourceName,
 										"resource_id":   aws.StringValue(instance.InstanceId),
