@@ -205,7 +205,6 @@ func processResults(results []aws.ScanResult) TemplateData {
 		// Add to resources list
 		resourceName, _ := result.Details["name"].(string)
 		resourceID, _ := result.Details["id"].(string)
-		reason, _ := result.Details["reason"].(string)
 
 		data.Resources = append(data.Resources, Resource{
 			AccountID:    accountID,
@@ -214,7 +213,7 @@ func processResults(results []aws.ScanResult) TemplateData {
 			ResourceType: result.ResourceType,
 			Name:        resourceName,
 			ResourceID:  resourceID,
-			Reason:      reason,
+			Reason:      result.Reason,
 			Details:     fmt.Sprintf("%+v", result.Details),
 		})
 	}
