@@ -57,11 +57,13 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 
 	// If organization role is set, assume it first
 	if opts.OrganizationRole != "" {
+		// Create new session with organization role
 		orgSess, err := AssumeRole("", opts.OrganizationRole, sess)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assume organization role: %w", err)
 		}
-		sess = orgSess
+		// Keep the region configuration when updating the session
+		sess = orgSess.Copy(cfg)
 	}
 
 	// If no scanner role specified, return current session
@@ -101,7 +103,8 @@ func AssumeRole(targetAccountID, roleName string, sess *session.Session) (*sessi
 	// Construct role ARN for target account
 	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, roleName)
 
-	// Create new session with assumed role
+	// Create new session with assumed role while preserving the original config
+	cfg := sess.Config.Copy()
 	creds := stscreds.NewCredentials(sess, roleARN)
-	return session.NewSession(aws.NewConfig().WithCredentials(creds))
+	return session.NewSession(cfg.WithCredentials(creds))
 }
