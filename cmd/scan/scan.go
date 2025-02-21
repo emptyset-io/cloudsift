@@ -214,7 +214,13 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var resultsMutex sync.Mutex
 
 	for _, scanner := range scanners {
-		for _, region := range regions {
+		// For IAM scanners, only scan in us-east-1 since IAM is a global service
+		scanRegions := regions
+		if scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users" {
+			scanRegions = []string{"us-east-1"}
+		}
+
+		for _, region := range scanRegions {
 			for _, account := range accounts {
 				scanner := scanner // Create new variable for closure
 				region := region
@@ -239,7 +245,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 							results[i].Details = make(map[string]interface{})
 						}
 						results[i].Details["account_id"] = account.ID
-						results[i].Details["region"] = region
+						if scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users" {
+							results[i].Details["region"] = "global"
+						} else {
+							results[i].Details["region"] = region
+						}
 					}
 
 					// Safely append results
