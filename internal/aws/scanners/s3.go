@@ -134,7 +134,6 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	clients := utils.CreateServiceClients(sess)
 	s3Client := s3.New(sess)
 
 	var results awslib.ScanResults
@@ -167,26 +166,29 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			bucketRegion = "us-east-1"
 		}
 
+		// Create a new session for the bucket's region if it's different
+		bucketSess := sess
 		if bucketRegion != opts.Region {
-			logging.Debug("Skipping bucket in different region", map[string]interface{}{
-				"bucket":        bucketName,
-				"bucket_region": bucketRegion,
-				"target_region": opts.Region,
+			bucketSess = opts.Session.Copy(&aws.Config{
+				Region: aws.String(bucketRegion),
 			})
-			continue
 		}
+
+		// Create clients for the bucket's region
+		bucketS3Client := s3.New(bucketSess)
+		bucketClients := utils.CreateServiceClients(bucketSess)
 
 		logging.Debug("Analyzing S3 bucket", map[string]interface{}{
 			"bucket": bucketName,
 			"region": bucketRegion,
 		})
 
-		currentObjectCount := s.getBucketObjectCount(s3Client, bucketName)
+		currentObjectCount := s.getBucketObjectCount(bucketS3Client, bucketName)
 
-		metrics, err := s.getBucketMetrics(clients.CloudWatch, bucketName, startTime, endTime)
+		metrics, err := s.getBucketMetrics(bucketClients.CloudWatch, bucketName, startTime, endTime)
 		if err != nil {
 			logging.Error("Failed to get bucket metrics", err, map[string]interface{}{
-				"bucket":     bucketName,
+				"bucket":    bucketName,
 				"startTime": startTime.Format(time.RFC3339),
 				"endTime":   endTime.Format(time.RFC3339),
 			})
@@ -194,7 +196,7 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		}
 
 		// Try to get bucket versioning status
-		versioning, err := s3Client.GetBucketVersioning(&s3.GetBucketVersioningInput{
+		versioning, err := bucketS3Client.GetBucketVersioning(&s3.GetBucketVersioningInput{
 			Bucket: aws.String(bucketName),
 		})
 		if err != nil {
@@ -204,7 +206,7 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		}
 
 		// Try to get bucket encryption
-		encryption, err := s3Client.GetBucketEncryption(&s3.GetBucketEncryptionInput{
+		encryption, err := bucketS3Client.GetBucketEncryption(&s3.GetBucketEncryptionInput{
 			Bucket: aws.String(bucketName),
 		})
 		if err != nil {
@@ -219,7 +221,7 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		if len(reasons) > 0 {
 			details := map[string]interface{}{
 				"ObjectCount":     currentObjectCount,
-				"Region":         bucketRegion,
+				"Region":          bucketRegion,
 				"BucketSizeBytes": metrics["bucket_size"],
 				"GetRequests":     metrics["get_requests"],
 				"PutRequests":     metrics["put_requests"],
