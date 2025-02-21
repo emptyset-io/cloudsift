@@ -132,7 +132,7 @@ func (s *DynamoDBScanner) determineUnusedReasons(metrics map[string]float64, ite
 // Scan implements Scanner interface
 func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
@@ -258,8 +258,8 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 				ResourceType: s.Label(),
 				ResourceName: *tableName,
 				ResourceID:   resourceARN,
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			})
 		}
 	}

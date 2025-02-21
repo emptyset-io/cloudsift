@@ -39,7 +39,7 @@ func (s *EBSSnapshotScanner) Label() string {
 // Scan implements Scanner interface
 func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
@@ -207,10 +207,10 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					ResourceType: s.Label(),
 					ResourceName: resourceName,
 					ResourceID:   aws.StringValue(snapshot.SnapshotId),
-					Reason:      reasons[0],
-					Tags:        tags,
-					Details:     details,
-					Cost:        costDetails,
+					Reason:       reasons[0],
+					Tags:         tags,
+					Details:      details,
+					Cost:         costDetails,
 				})
 			}
 		}

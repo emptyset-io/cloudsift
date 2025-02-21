@@ -168,8 +168,8 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	ctx := context.Background()
 
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Create base sess, err := awslib.GetScannerSession(opts)ion with region
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,

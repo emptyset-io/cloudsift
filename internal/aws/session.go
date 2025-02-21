@@ -3,8 +3,6 @@ package aws
 import (
 	"fmt"
 
-	"cloudsift/internal/config"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -29,11 +27,43 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 		return sess, nil
 	}
 
-	// If organization role is set and we're trying to assume the scanner role,
-	// use the organization role first
-	if config.Config.OrganizationRole != "" && role == config.Config.ScannerRole {
+	// Get current account ID
+	svc := sts.New(sess)
+	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+
+	// Construct role ARN
+	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, role)
+
+	// Create new session with assumed role
+	creds := stscreds.NewCredentials(sess, roleARN)
+	return session.NewSession(cfg.WithCredentials(creds))
+}
+
+// GetScannerSession creates a new AWS session for scanning, using organization role if provided
+func GetScannerSession(opts ScanOptions) (*session.Session, error) {
+	cfg := aws.NewConfig()
+	if opts.Region != "" {
+		cfg = cfg.WithRegion(opts.Region)
+	}
+
+	// Create base session
+	sess, err := session.NewSession(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	}
+
+	// If no roles specified, return base session
+	if opts.Role == "" {
+		return sess, nil
+	}
+
+	// If organization role is set, assume it first
+	if opts.OrganizationRole != "" {
 		// First assume the organization role
-		orgSess, err := AssumeRole("", config.Config.OrganizationRole, sess)
+		orgSess, err := AssumeRole("", opts.OrganizationRole, sess)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assume organization role: %w", err)
 		}
@@ -46,12 +76,12 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 		}
 
 		// Now assume the scanner role from the organization role session
-		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, role)
+		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
 		creds := stscreds.NewCredentials(orgSess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
 	}
 
-	// If no organization role or different role, assume role directly
+	// If no organization role, assume scanner role directly
 	svc := sts.New(sess)
 	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
@@ -59,7 +89,7 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 	}
 
 	// Construct role ARN
-	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, role)
+	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
 
 	// Create new session with assumed role
 	creds := stscreds.NewCredentials(sess, roleARN)

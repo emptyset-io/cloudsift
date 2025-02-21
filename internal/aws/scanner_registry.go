@@ -7,9 +7,10 @@ import (
 
 // ScanOptions contains configuration for the scan operation
 type ScanOptions struct {
-	Region     string // AWS region to scan
-	DaysUnused int    // Number of days a resource must be unused to be reported
-	Role       string // Role to assume for scanning
+	Region          string // AWS region to scan
+	DaysUnused      int    // Number of days a resource must be unused to be reported
+	Role            string // Role to assume for scanning
+	OrganizationRole string // Role to assume for organization access
 }
 
 // Scanner represents a resource scanner that can scan AWS resources

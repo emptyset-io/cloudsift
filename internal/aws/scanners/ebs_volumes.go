@@ -41,7 +41,7 @@ func (s *EBSVolumeScanner) Label() string {
 // Scan implements Scanner interface
 func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,

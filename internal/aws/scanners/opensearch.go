@@ -167,7 +167,7 @@ func (s *OpenSearchScanner) determineUnusedReasons(metrics map[string]float64, v
 // Scan implements Scanner interface
 func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
@@ -218,7 +218,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		}
 
 		status := describeOutput.DomainStatus
-		
+
 		// Get cluster metrics
 		metrics, err := s.getClusterMetrics(cwClient, domainName, startTime, endTime)
 		if err != nil {
@@ -240,8 +240,8 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		if len(reasons) > 0 {
 			// Calculate cost
 			costConfig := awslib.ResourceCostConfig{
-				ResourceType:   "OpenSearch",
-				ResourceSize:   instanceType,
+				ResourceType:  "OpenSearch",
+				ResourceSize:  instanceType,
 				Region:        opts.Region,
 				CreationTime:  time.Now(), // OpenSearch API doesn't provide creation time
 				VolumeType:    volumeType,
@@ -257,15 +257,15 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 			}
 
 			details := map[string]interface{}{
-				"InstanceType":    instanceType,
-				"InstanceCount":   instanceCount,
+				"InstanceType":   instanceType,
+				"InstanceCount":  instanceCount,
 				"VolumeType":     volumeType,
 				"VolumeSizeGB":   volumeSize,
 				"CPUUtilization": metrics["cpu_utilization"],
 				"SearchRate":     metrics["search_rate"],
 				"IndexRate":      metrics["index_rate"],
 				"DocumentCount":  metrics["doc_count"],
-				"JVMMemory":     metrics["jvm_memory"],
+				"JVMMemory":      metrics["jvm_memory"],
 				"AccountId":      accountID,
 				"Region":         opts.Region,
 			}
@@ -278,8 +278,8 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				ResourceType: s.Label(),
 				ResourceName: domainName,
 				ResourceID:   aws.StringValue(status.ARN),
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			}
 
 			results = append(results, result)

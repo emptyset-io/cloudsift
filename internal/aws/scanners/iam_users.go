@@ -152,7 +152,7 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 // Scan implements Scanner interface
 func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
@@ -250,8 +250,8 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			if len(reasons) > 0 {
 				// Create details map with IAM user-specific fields
 				details := map[string]interface{}{
-					"AccountId":        accountID,
-					"Region":           "global",
+					"AccountId":       accountID,
+					"Region":          "global",
 					"Path":            aws.StringValue(userData.Path),
 					"CreateDate":      aws.TimeValue(userData.CreateDate).Format(time.RFC3339),
 					"LastLoginTime":   formatTimeOrNever(lastLoginTime),
@@ -267,8 +267,8 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 					ResourceType: s.Label(),
 					ResourceName: userName,
 					ResourceID:   userARN,
-					Reason:      strings.Join(reasons, "\n"),
-					Details:     details,
+					Reason:       strings.Join(reasons, "\n"),
+					Details:      details,
 				}
 
 				resultsMu.Lock()
@@ -283,7 +283,7 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 
 	logging.Debug("Completed IAM users scan", map[string]interface{}{
 		"total_users": len(users),
-		"account_id": accountID,
+		"account_id":  accountID,
 	})
 
 	return results, nil

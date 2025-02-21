@@ -75,8 +75,8 @@ func (s *ElasticIPScanner) checkNATGatewayAssociation(ec2Client *ec2.EC2, alloca
 
 // Scan implements Scanner interface
 func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Create session for scanning
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
