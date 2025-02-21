@@ -74,6 +74,12 @@ run: build
 
 .PHONY: release
 release: lint test build-all
-	@echo "Creating Git release $(VERSION)..."
-	gh release create $(VERSION) bin/* --title "Release $(VERSION)" --notes "Automated release for version $(VERSION)"
-	@echo "Release $(VERSION) created successfully."
+	@echo "Running version command to capture the version..."
+	$(eval GH_VERSION=$(shell ./bin/cloudsift-linux-amd64 version | awk '{print $$2}'))
+	@echo "Captured version: $(GH_VERSION)"
+	@echo "Creating Git release $(GH_VERSION)..."
+	gh release create v$(GH_VERSION) bin/* --title "Release $(GH_VERSION)" --notes "Automated release for version $(GH_VERSION)"
+	@echo "Release v$(GH_VERSION) created successfully."
+
+
+

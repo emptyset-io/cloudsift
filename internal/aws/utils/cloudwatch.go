@@ -26,7 +26,7 @@ func GetResourceMetrics(cwClient *cloudwatch.CloudWatch, config MetricConfig) (f
 		MetricName: aws.String(config.MetricName),
 		StartTime:  aws.Time(config.StartTime),
 		EndTime:    aws.Time(config.EndTime),
-		Period:    aws.Int64(3600), // 1 hour
+		Period:    aws.Int64(86400), // 24 hours
 		Statistics: []*string{
 			aws.String(config.Statistic),
 		},
@@ -80,7 +80,7 @@ func GetResourceMetricsData(cwClient *cloudwatch.CloudWatch, configs []MetricCon
 						},
 					},
 				},
-				Period: aws.Int64(3600),
+				Period: aws.Int64(86400), // 24 hours
 				Stat:   aws.String(config.Statistic),
 			},
 		}
