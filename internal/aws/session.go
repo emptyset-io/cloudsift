@@ -64,24 +64,35 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 		}
 		// Keep the region configuration when updating the session
 		sess = orgSess.Copy(cfg)
+
+		// If scanner role is specified, assume it using the organization role session
+		if opts.Role != "" {
+			// Get current account ID for target role ARN using the org role session
+			svc := sts.New(sess)
+			identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get caller identity: %w", err)
+			}
+
+			// Now assume the scanner role from the organization role session
+			roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
+			creds := stscreds.NewCredentials(sess, roleARN)
+			return session.NewSession(cfg.WithCredentials(creds))
+		}
+	} else if opts.Role != "" {
+		// If no organization role but scanner role specified, assume scanner role directly
+		svc := sts.New(sess)
+		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get caller identity: %w", err)
+		}
+
+		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
+		creds := stscreds.NewCredentials(sess, roleARN)
+		return session.NewSession(cfg.WithCredentials(creds))
 	}
 
-	// If no scanner role specified, return current session
-	if opts.Role == "" {
-		return sess, nil
-	}
-
-	// Get current account ID for target role ARN
-	svc := sts.New(sess)
-	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
-	// Now assume the scanner role from the current session
-	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
-	creds := stscreds.NewCredentials(sess, roleARN)
-	return session.NewSession(cfg.WithCredentials(creds))
+	return sess, nil
 }
 
 // AssumeRole creates a new session by assuming the specified role in the target account
