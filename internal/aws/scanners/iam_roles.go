@@ -1,13 +1,16 @@
 package scanners
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	awslib "cloudsift/internal/aws"
 	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
+	"cloudsift/internal/worker"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/iam"
@@ -180,83 +183,99 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 		return nil, fmt.Errorf("failed to list IAM roles: %w", err)
 	}
 
-	var results awslib.ScanResults
-	now := time.Now()
+	var (
+		results   awslib.ScanResults
+		resultsMu sync.Mutex
+		now       = time.Now()
+	)
 
+	// Create tasks for concurrent processing
+	tasks := make([]worker.Task, 0, len(roles))
 	for _, role := range roles {
-		roleName := aws.StringValue(role.RoleName)
-		roleARN := aws.StringValue(role.Arn)
+		role := role // Create a new variable for the closure
+		tasks = append(tasks, func(ctx context.Context) error {
+			roleName := aws.StringValue(role.RoleName)
+			roleARN := aws.StringValue(role.Arn)
 
-		// Skip reserved roles
-		if s.isReservedRole(roleARN) {
-			logging.Debug("Skipping reserved role", map[string]interface{}{
+			// Skip reserved roles
+			if s.isReservedRole(roleARN) {
+				logging.Debug("Skipping reserved role", map[string]interface{}{
+					"role_name": roleName,
+					"role_arn":  roleARN,
+				})
+				return nil
+			}
+
+			logging.Debug("Analyzing IAM role", map[string]interface{}{
 				"role_name": roleName,
 				"role_arn":  roleARN,
 			})
-			continue
-		}
 
-		logging.Debug("Analyzing IAM role", map[string]interface{}{
-			"role_name": roleName,
-			"role_arn":  roleARN,
+			// Get last used time
+			lastUsedTime, err := s.getRoleLastUsed(iamClient, roleName)
+			if err != nil {
+				logging.Error("Failed to get role last used", err, map[string]interface{}{
+					"role_name": roleName,
+				})
+				return nil
+			}
+
+			// Get policies and instance profiles
+			attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(iamClient, roleName)
+			if err != nil {
+				logging.Error("Failed to get role policies", err, map[string]interface{}{
+					"role_name": roleName,
+				})
+				return nil
+			}
+
+			// Calculate age string
+			ageString := s.calculateAgeString(now, lastUsedTime)
+
+			// Determine unused reasons
+			reasons := s.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, opts.DaysUnused, opts)
+
+			if len(reasons) > 0 {
+				// Create details map with IAM-specific fields
+				details := map[string]interface{}{
+					"LastUsed":         ageString,
+					"InstanceProfiles": len(instanceProfiles),
+					"PoliciesAttached": len(attachedPolicies) + len(inlinePolicies),
+					"AccountId":        accountID,
+					"Region":           opts.Region,
+				}
+
+				// Add additional IAM-specific details
+				details["role_path"] = aws.StringValue(role.Path)
+				details["create_date"] = aws.TimeValue(role.CreateDate).Format(time.RFC3339)
+				details["max_session_duration"] = aws.Int64Value(role.MaxSessionDuration)
+				if role.Description != nil {
+					details["description"] = aws.StringValue(role.Description)
+				}
+				if role.PermissionsBoundary != nil {
+					details["permissions_boundary"] = aws.StringValue(role.PermissionsBoundary.PermissionsBoundaryArn)
+				}
+
+				result := awslib.ScanResult{
+					ResourceType: s.Label(),
+					ResourceName: roleName,
+					ResourceID:   roleARN,
+					Reason:      strings.Join(reasons, "\n"),
+					Details:     details,
+				}
+
+				// Safely append to results
+				resultsMu.Lock()
+				results = append(results, result)
+				resultsMu.Unlock()
+			}
+			return nil
 		})
-
-		// Get last used time
-		lastUsedTime, err := s.getRoleLastUsed(iamClient, roleName)
-		if err != nil {
-			logging.Error("Failed to get role last used", err, map[string]interface{}{
-				"role_name": roleName,
-			})
-			continue
-		}
-
-		// Get policies and instance profiles
-		attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(iamClient, roleName)
-		if err != nil {
-			logging.Error("Failed to get role policies", err, map[string]interface{}{
-				"role_name": roleName,
-			})
-			continue
-		}
-
-		// Calculate age string
-		ageString := s.calculateAgeString(now, lastUsedTime)
-
-		// Determine unused reasons
-		reasons := s.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, opts.DaysUnused, opts)
-
-		if len(reasons) > 0 {
-			// Create details map with IAM-specific fields
-			details := map[string]interface{}{
-				"LastUsed":         ageString,
-				"InstanceProfiles": len(instanceProfiles),
-				"PoliciesAttached": len(attachedPolicies) + len(inlinePolicies),
-				"AccountId":        accountID,
-				"Region":           opts.Region,
-			}
-
-			// Add additional IAM-specific details
-			details["role_path"] = aws.StringValue(role.Path)
-			details["create_date"] = aws.TimeValue(role.CreateDate).Format(time.RFC3339)
-			details["max_session_duration"] = aws.Int64Value(role.MaxSessionDuration)
-			if role.Description != nil {
-				details["description"] = aws.StringValue(role.Description)
-			}
-			if role.PermissionsBoundary != nil {
-				details["permissions_boundary"] = aws.StringValue(role.PermissionsBoundary.PermissionsBoundaryArn)
-			}
-
-			result := awslib.ScanResult{
-				ResourceType: s.Label(),
-				ResourceName: roleName,
-				ResourceID:   roleARN,
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
-			}
-
-			results = append(results, result)
-		}
 	}
+
+	// Create and run worker pool with 10 workers
+	pool := worker.NewPool(10)
+	pool.ExecuteTasks(tasks)
 
 	return results, nil
 }
