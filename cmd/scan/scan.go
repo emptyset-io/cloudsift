@@ -201,6 +201,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						DaysUnused:       opts.daysUnused,
 						Role:             opts.scannerRole,
 						OrganizationRole: opts.organizationRole,
+						TargetAccountID:  account.ID,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)

@@ -67,27 +67,36 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 
 		// If scanner role is specified, assume it using the organization role session
 		if opts.Role != "" {
-			// Get current account ID for target role ARN using the org role session
-			svc := sts.New(sess)
-			identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-			if err != nil {
-				return nil, fmt.Errorf("failed to get caller identity: %w", err)
+			// Use target account ID if provided, otherwise get current account ID
+			targetAccountID := opts.TargetAccountID
+			if targetAccountID == "" {
+				svc := sts.New(sess)
+				identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+				if err != nil {
+					return nil, fmt.Errorf("failed to get caller identity: %w", err)
+				}
+				targetAccountID = *identity.Account
 			}
 
-			// Now assume the scanner role from the organization role session
-			roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
+			// Now assume the scanner role from the organization role session in the target account
+			roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
 			creds := stscreds.NewCredentials(sess, roleARN)
 			return session.NewSession(cfg.WithCredentials(creds))
 		}
 	} else if opts.Role != "" {
 		// If no organization role but scanner role specified, assume scanner role directly
-		svc := sts.New(sess)
-		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller identity: %w", err)
+		// Use target account ID if provided, otherwise get current account ID
+		targetAccountID := opts.TargetAccountID
+		if targetAccountID == "" {
+			svc := sts.New(sess)
+			identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get caller identity: %w", err)
+			}
+			targetAccountID = *identity.Account
 		}
 
-		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, opts.Role)
+		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
 		creds := stscreds.NewCredentials(sess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
 	}
