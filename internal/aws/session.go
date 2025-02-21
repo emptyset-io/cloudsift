@@ -57,7 +57,7 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 
 	// If organization role is set, assume it first
 	if opts.OrganizationRole != "" {
-		// First get organization account ID from base session
+		// Get organization account ID from base session
 		svc := sts.New(sess)
 		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 		if err != nil {
@@ -75,9 +75,10 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 
 		// If scanner role is specified, use org role session to assume scanner role in target account
 		if opts.Role != "" {
+			// Use target account ID if provided, otherwise default to org account
 			targetAccountID := opts.TargetAccountID
 			if targetAccountID == "" {
-				targetAccountID = orgAccountID // Default to org account if no target specified
+				targetAccountID = orgAccountID
 			}
 
 			// Now assume the scanner role in the target account using the org role session
@@ -89,19 +90,16 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 		return orgSess, nil
 	}
 
-	// If no organization role but scanner role specified, assume scanner role directly
+	// If no organization role but scanner role specified, assume scanner role directly in current account
 	if opts.Role != "" {
-		targetAccountID := opts.TargetAccountID
-		if targetAccountID == "" {
-			svc := sts.New(sess)
-			identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-			if err != nil {
-				return nil, fmt.Errorf("failed to get caller identity: %w", err)
-			}
-			targetAccountID = *identity.Account
+		svc := sts.New(sess)
+		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get caller identity: %w", err)
 		}
+		currentAccountID := *identity.Account
 
-		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
+		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", currentAccountID, opts.Role)
 		creds := stscreds.NewCredentials(sess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
 	}
