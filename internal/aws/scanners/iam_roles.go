@@ -65,46 +65,46 @@ func (s *IAMRoleScanner) getRoleLastUsed(iamClient *iam.IAM, roleName string) (*
 }
 
 // getRolePolicies retrieves the attached policies, inline policies, and instance profiles for the role
-func (s *IAMRoleScanner) getRolePolicies(iamClient *iam.IAM, roleName string) ([]*iam.AttachedPolicy, []string, []*iam.InstanceProfile, error) {
-	var attachedPolicies []*iam.AttachedPolicy
-	var inlinePolicies []string
-	var instanceProfiles []*iam.InstanceProfile
+// func (s *IAMRoleScanner) getRolePolicies(iamClient *iam.IAM, roleName string) ([]*iam.AttachedPolicy, []string, []*iam.InstanceProfile, error) {
+// 	var attachedPolicies []*iam.AttachedPolicy
+// 	var inlinePolicies []string
+// 	var instanceProfiles []*iam.InstanceProfile
 
-	// Get attached policies
-	err := iamClient.ListAttachedRolePoliciesPages(&iam.ListAttachedRolePoliciesInput{
-		RoleName: aws.String(roleName),
-	}, func(page *iam.ListAttachedRolePoliciesOutput, lastPage bool) bool {
-		attachedPolicies = append(attachedPolicies, page.AttachedPolicies...)
-		return !lastPage
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to list attached policies: %w", err)
-	}
+// 	// Get attached policies
+// 	err := iamClient.ListAttachedRolePoliciesPages(&iam.ListAttachedRolePoliciesInput{
+// 		RoleName: aws.String(roleName),
+// 	}, func(page *iam.ListAttachedRolePoliciesOutput, lastPage bool) bool {
+// 		attachedPolicies = append(attachedPolicies, page.AttachedPolicies...)
+// 		return !lastPage
+// 	})
+// 	if err != nil {
+// 		return nil, nil, nil, fmt.Errorf("failed to list attached policies: %w", err)
+// 	}
 
-	// Get inline policies
-	err = iamClient.ListRolePoliciesPages(&iam.ListRolePoliciesInput{
-		RoleName: aws.String(roleName),
-	}, func(page *iam.ListRolePoliciesOutput, lastPage bool) bool {
-		inlinePolicies = append(inlinePolicies, aws.StringValueSlice(page.PolicyNames)...)
-		return !lastPage
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to list inline policies: %w", err)
-	}
+// 	// Get inline policies
+// 	err = iamClient.ListRolePoliciesPages(&iam.ListRolePoliciesInput{
+// 		RoleName: aws.String(roleName),
+// 	}, func(page *iam.ListRolePoliciesOutput, lastPage bool) bool {
+// 		inlinePolicies = append(inlinePolicies, aws.StringValueSlice(page.PolicyNames)...)
+// 		return !lastPage
+// 	})
+// 	if err != nil {
+// 		return nil, nil, nil, fmt.Errorf("failed to list inline policies: %w", err)
+// 	}
 
-	// Get instance profiles
-	err = iamClient.ListInstanceProfilesForRolePages(&iam.ListInstanceProfilesForRoleInput{
-		RoleName: aws.String(roleName),
-	}, func(page *iam.ListInstanceProfilesForRoleOutput, lastPage bool) bool {
-		instanceProfiles = append(instanceProfiles, page.InstanceProfiles...)
-		return !lastPage
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to list instance profiles: %w", err)
-	}
+// 	// Get instance profiles
+// 	err = iamClient.ListInstanceProfilesForRolePages(&iam.ListInstanceProfilesForRoleInput{
+// 		RoleName: aws.String(roleName),
+// 	}, func(page *iam.ListInstanceProfilesForRoleOutput, lastPage bool) bool {
+// 		instanceProfiles = append(instanceProfiles, page.InstanceProfiles...)
+// 		return !lastPage
+// 	})
+// 	if err != nil {
+// 		return nil, nil, nil, fmt.Errorf("failed to list instance profiles: %w", err)
+// 	}
 
-	return attachedPolicies, inlinePolicies, instanceProfiles, nil
-}
+// 	return attachedPolicies, inlinePolicies, instanceProfiles, nil
+// }
 
 // calculateAgeString formats the time difference between now and a given time
 func (s *IAMRoleScanner) calculateAgeString(now time.Time, t *time.Time) string {
@@ -126,7 +126,7 @@ func (s *IAMRoleScanner) calculateAgeString(now time.Time, t *time.Time) string 
 }
 
 // determineUnusedReasons determines why a role is considered unused
-func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attachedPolicies []*iam.AttachedPolicy, inlinePolicies []string, instanceProfiles []*iam.InstanceProfile, ageString string, daysThreshold int, opts awslib.ScanOptions) []string {
+func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, ageString string, daysThreshold int, opts awslib.ScanOptions) []string {
 	var reasons []string
 
 	// Check for roles with no activity
@@ -136,15 +136,15 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 		lastUsedDate := aws.TimeValue(lastUsedTime)
 		age := time.Since(lastUsedDate)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Role has not been used in %d days (last used: %s).", 
+			reasons = append(reasons, fmt.Sprintf("Role has not been used in %d days (last used: %s).",
 				opts.DaysUnused, lastUsedDate.Format("2006-01-02")))
 		}
 	}
 
-	// Check for roles with no attached policies
-	if len(attachedPolicies) == 0 {
-		reasons = append(reasons, fmt.Sprintf("Role has no attached policies for %d days.", opts.DaysUnused))
-	}
+	// // Check for roles with no attached policies
+	// if len(attachedPolicies) == 0 {
+	// 	reasons = append(reasons, fmt.Sprintf("Role has no attached policies for %d days.", opts.DaysUnused))
+	// }
 
 	return reasons
 }
@@ -221,28 +221,29 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			}
 
 			// Get policies and instance profiles
-			attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(iamClient, roleName)
-			if err != nil {
-				logging.Error("Failed to get role policies", err, map[string]interface{}{
-					"role_name": roleName,
-				})
-				return nil
-			}
+			// attachedPolicies, inlinePolicies, instanceProfiles, err := s.getRolePolicies(iamClient, roleName)
+			// if err != nil {
+			// 	logging.Error("Failed to get role policies", err, map[string]interface{}{
+			// 		"role_name": roleName,
+			// 	})
+			// 	return nil
+			// }
 
 			// Calculate age string
 			ageString := s.calculateAgeString(now, lastUsedTime)
 
 			// Determine unused reasons
-			reasons := s.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, opts.DaysUnused, opts)
+			// reasons := s.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, opts.DaysUnused, opts)
+			reasons := s.determineUnusedReasons(lastUsedTime, ageString, opts.DaysUnused, opts)
 
 			if len(reasons) > 0 {
 				// Create details map with IAM-specific fields
 				details := map[string]interface{}{
-					"LastUsed":         ageString,
-					"InstanceProfiles": len(instanceProfiles),
-					"PoliciesAttached": len(attachedPolicies) + len(inlinePolicies),
-					"AccountId":        accountID,
-					"Region":           opts.Region,
+					"LastUsed": ageString,
+					// "InstanceProfiles": len(instanceProfiles),
+					// "PoliciesAttached": len(attachedPolicies) + len(inlinePolicies),
+					"AccountId": accountID,
+					"Region":    opts.Region,
 				}
 
 				// Add additional IAM-specific details
@@ -260,8 +261,8 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 					ResourceType: s.Label(),
 					ResourceName: roleName,
 					ResourceID:   roleARN,
-					Reason:      strings.Join(reasons, "\n"),
-					Details:     details,
+					Reason:       strings.Join(reasons, "\n"),
+					Details:      details,
 				}
 
 				// Safely append to results
