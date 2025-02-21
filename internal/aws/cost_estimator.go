@@ -46,33 +46,44 @@ type ResourceCostConfig struct {
 // AWS region to location name mapping for pricing API
 var regionToLocation = map[string]string{
 	// US Regions
-	"us-east-1": "US East (N. Virginia)",
-	"us-east-2": "US East (Ohio)",
-	"us-west-1": "US West (N. California)",
-	"us-west-2": "US West (Oregon)",
+	"us-east-1":      "US East (N. Virginia)",
+	"us-east-2":      "US East (Ohio)",
+	"us-west-1":      "US West (N. California)",
+	"us-west-2":      "US West (Oregon)",
+	"us-gov-east-1":  "AWS GovCloud (US-East)",
+	"us-gov-west-1":  "AWS GovCloud (US-West)",
 
-	// Canada
-	"ca-central-1": "Canada (Central)",
+	// Canada Regions
+	"ca-central-1":   "Canada (Central)",
+	"ca-west-1":      "Canada West (Calgary)",
 
 	// South America
-	"sa-east-1": "South America (São Paulo)",
+	"sa-east-1":      "South America (Sao Paulo)",
+	"cl-south-1":     "Chile (Santiago)",
+	"ar-south-1":     "Argentina (Buenos Aires)",
+	"pe-south-1":     "Peru (Lima)",
 
 	// Europe
-	"eu-central-1": "Europe (Frankfurt)",
-	"eu-central-2": "Europe (Zurich)",
-	"eu-west-1":    "Europe (Ireland)",
-	"eu-west-2":    "Europe (London)",
-	"eu-west-3":    "Europe (Paris)",
-	"eu-north-1":   "Europe (Stockholm)",
-	"eu-south-1":   "Europe (Milan)",
-	"eu-south-2":   "Europe (Spain)",
+	"eu-central-1":   "EU (Frankfurt)",
+	"eu-central-2":   "EU (Zurich)",
+	"eu-west-1":      "EU (Ireland)",
+	"eu-west-2":      "EU (London)",
+	"eu-west-3":      "EU (Paris)",
+	"eu-north-1":     "EU (Stockholm)",
+	"eu-south-1":     "EU (Milan)",
+	"eu-south-2":     "EU (Spain)",
+	"dk-south-1":     "Denmark (Copenhagen)",
+	"fi-south-1":     "Finland (Helsinki)",
+	"pl-south-1":     "Poland (Warsaw)",
 
-	// Africa
-	"af-south-1": "Africa (Cape Town)",
-
-	// Middle East
-	"me-central-1": "Middle East (UAE)",
-	"me-south-1":   "Middle East (Bahrain)",
+	// Africa and Middle East
+	"af-south-1":     "Africa (Cape Town)",
+	"me-central-1":   "Middle East (UAE)",
+	"me-south-1":     "Middle East (Bahrain)",
+	"il-central-1":   "Israel (Tel Aviv)",
+	"ma-south-1":     "Morocco (Casablanca)",
+	"om-south-1":     "Oman (Muscat)",
+	"ng-south-1":     "Nigeria (Lagos)",
 
 	// Asia Pacific
 	"ap-east-1":      "Asia Pacific (Hong Kong)",
@@ -85,10 +96,79 @@ var regionToLocation = map[string]string{
 	"ap-northeast-1": "Asia Pacific (Tokyo)",
 	"ap-northeast-2": "Asia Pacific (Seoul)",
 	"ap-northeast-3": "Asia Pacific (Osaka)",
+	"ap-northeast-4": "Asia Pacific (Malaysia)",
+	"ap-south-3":     "Asia Pacific (Thailand)",
+	"ap-southeast-5": "Asia Pacific (Thailand)",
+	"ph-south-1":     "Philippines (Manila)",
+	"tw-north-1":     "Taiwan (Taipei)",
+	"nz-north-1":     "New Zealand (Auckland)",
+	"ap-west-1":      "Australia (Perth)",
 
-	// China (requires separate AWS accounts)
-	"cn-north-1":     "China (Beijing)",
-	"cn-northwest-1": "China (Ningxia)",
+	// Mexico
+	"mx-central-1":   "Mexico (Central)",
+	"mx-south-1":     "Mexico (Queretaro)",
+
+	// India
+	"in-south-1":     "India (Delhi)",
+	"in-east-1":      "India (Kolkata)",
+
+	// KDDI Regions
+	"apne-1":         "Asia Pacific (KDDI) - Tokyo",
+	"apne-2":         "Asia Pacific (KDDI) - Osaka",
+
+	// SKT Regions
+	"apne-3":         "Asia Pacific (SKT) - Seoul",
+	"apne-4":         "Asia Pacific (SKT) - Daejeon",
+
+	// Local Zones are priced based on their parent region
+	"us-east-1-atl-1":   "US East (N. Virginia)", // Atlanta
+	"us-east-1-bos-1":   "US East (N. Virginia)", // Boston
+	"us-east-1-chi-1":   "US East (N. Virginia)", // Chicago
+	"us-east-1-dfw-1":   "US East (N. Virginia)", // Dallas
+	"us-east-1-iah-1":   "US East (N. Virginia)", // Houston
+	"us-east-1-mci-1":   "US East (N. Virginia)", // Kansas City
+	"us-east-1-mia-1":   "US East (N. Virginia)", // Miami
+	"us-east-1-msp-1":   "US East (N. Virginia)", // Minneapolis
+	"us-east-1-nyc-1":   "US East (N. Virginia)", // New York
+	"us-east-1-phl-1":   "US East (N. Virginia)", // Philadelphia
+	"us-west-2-den-1":   "US West (Oregon)",      // Denver
+	"us-west-2-hnl-1":   "US West (Oregon)",      // Honolulu
+	"us-west-2-las-1":   "US West (Oregon)",      // Las Vegas
+	"us-west-2-lax-1":   "US West (Oregon)",      // Los Angeles
+	"us-west-2-pdx-1":   "US West (Oregon)",      // Portland
+	"us-west-2-phx-1":   "US West (Oregon)",      // Phoenix
+	"us-west-2-sea-1":   "US West (Oregon)",      // Seattle
+
+	// Wavelength Zones (Verizon) - map to parent region for pricing
+	"us-east-1-wl1-atl-wlz-1": "US East (N. Virginia)", // Atlanta
+	"us-east-1-wl1-bos-wlz-1": "US East (N. Virginia)", // Boston
+	"us-east-1-wl1-chi-wlz-1": "US East (N. Virginia)", // Chicago
+	"us-east-1-wl1-dfw-wlz-1": "US East (N. Virginia)", // Dallas
+	"us-east-1-wl1-det-wlz-1": "US East (N. Virginia)", // Detroit
+	"us-east-1-wl1-iah-wlz-1": "US East (N. Virginia)", // Houston
+	"us-east-1-wl1-mia-wlz-1": "US East (N. Virginia)", // Miami
+	"us-east-1-wl1-msp-wlz-1": "US East (N. Virginia)", // Minneapolis
+	"us-east-1-wl1-nyc-wlz-1": "US East (N. Virginia)", // New York
+	"us-east-1-wl1-was-wlz-1": "US East (N. Virginia)", // Washington DC
+	"us-west-2-wl1-den-wlz-1": "US West (Oregon)",      // Denver
+	"us-west-2-wl1-las-wlz-1": "US West (Oregon)",      // Las Vegas
+	"us-west-2-wl1-lax-wlz-1": "US West (Oregon)",      // Los Angeles
+	"us-west-2-wl1-phx-wlz-1": "US West (Oregon)",      // Phoenix
+	"us-west-2-wl1-sfo-wlz-1": "US West (Oregon)",      // San Francisco
+	"us-west-2-wl1-sea-wlz-1": "US West (Oregon)",      // Seattle
+
+	// British Telecom Zones - map to parent region for pricing
+	"eu-west-2-wl2-man-1": "EU (London)", // Manchester
+
+	// Vodafone Zones - map to parent region for pricing
+	"eu-central-1-wl2-ber-1": "EU (Frankfurt)", // Berlin
+	"eu-central-1-wl2-dtm-1": "EU (Frankfurt)", // Dortmund
+	"eu-central-1-wl2-muc-1": "EU (Frankfurt)", // Munich
+	"eu-west-2-wl2-lon-1":    "EU (London)",    // London
+	"eu-west-2-wl2-man-2":    "EU (London)",    // Manchester
+
+	// Bell Zones - map to parent region for pricing
+	"ca-central-1-wl2-yto-1": "Canada (Central)", // Toronto
 }
 
 // Static prices for EBS snapshots per hour

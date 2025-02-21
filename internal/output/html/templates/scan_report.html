@@ -209,7 +209,6 @@
                     </thead>
                     <tbody>
                         {{ range $resourceType, $costs := .CombinedCosts }}
-                        {{ if ne $resourceType "Total" }}
                         <tr>
                             <td>{{ $resourceType }}</td>
                             <td>${{ formatHourlyCost (index $costs "hourly_rate") }}</td>
@@ -225,14 +224,13 @@
                             </td>
                         </tr>
                         {{ end }}
-                        {{ end }}
-                        <tr>
-                            <td>Totals</td>
-                            <td>${{ formatHourlyCost .ScanMetrics.TotalHourly }}</td>
-                            <td>${{ formatDailyCost .ScanMetrics.TotalDaily }}</td>
-                            <td>${{ formatMonthlyCost .ScanMetrics.TotalMonthly }}</td>
-                            <td>${{ formatYearlyCost .ScanMetrics.TotalYearly }}</td>
-                            <td>${{ formatLifetimeCost .ScanMetrics.TotalLifetime }}</td>
+                        <tr class="totals-row">
+                            <td><strong>Totals</strong></td>
+                            <td><strong>${{ formatHourlyCost .ScanMetrics.TotalHourly }}</strong></td>
+                            <td><strong>${{ formatDailyCost .ScanMetrics.TotalDaily }}</strong></td>
+                            <td><strong>${{ formatMonthlyCost .ScanMetrics.TotalMonthly }}</strong></td>
+                            <td><strong>${{ formatYearlyCost .ScanMetrics.TotalYearly }}</strong></td>
+                            <td><strong>${{ formatLifetimeCost .ScanMetrics.TotalLifetime }}</strong></td>
                         </tr>
                     </tbody>
                 </table>
@@ -248,14 +246,16 @@
                     <line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
                 Unused Resources
-                <button id="export-csv" class="export-btn" onclick="exportToCSV()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    Export to CSV
-                </button>
+                <div class="button-group">
+                    <button class="action-button" onclick="exportToCSV()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Export to CSV
+                    </button>
+                </div>
             </h3>
             <div class="input-container">
                 <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -338,5 +338,36 @@
             <pre id="modal-details"></pre>
         </div>
     </div>
+    <style>
+        .action-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background-color: #4a5568;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .action-button:hover {
+            background-color: #2d3748;
+        }
+        
+        .action-button svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+    </style>
 </body>
 </html>

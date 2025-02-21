@@ -164,36 +164,42 @@ func processResults(results []aws.ScanResult) TemplateData {
 		data.ResourceTypeCounts[result.ResourceType]++
 
 		// Add costs to combined costs
-		if cost, ok := result.Details["cost"].(map[string]interface{}); ok {
+		if result.Cost != nil {
 			if _, exists := data.CombinedCosts[result.ResourceType]; !exists {
 				data.CombinedCosts[result.ResourceType] = make(map[string]interface{})
-			}
-			addCostBreakdown(data.CombinedCosts[result.ResourceType], cost)
-
-			// Add to totals if not Elastic IPs or Load Balancers
-			if result.ResourceType != "Elastic IPs" && result.ResourceType != "Load Balancers" {
-				if hourly, ok := cost["hourly_rate"].(float64); ok {
-					totalHourly += hourly
-				}
-				if daily, ok := cost["daily_rate"].(float64); ok {
-					totalDaily += daily
-				}
-				if monthly, ok := cost["monthly_rate"].(float64); ok {
-					totalMonthly += monthly
-				}
-				if yearly, ok := cost["yearly_rate"].(float64); ok {
-					totalYearly += yearly
-				}
-				if lifetime, ok := cost["lifetime"].(float64); ok {
-					totalLifetime += lifetime
-				}
+				data.CombinedCosts[result.ResourceType]["hourly_rate"] = 0.0
+				data.CombinedCosts[result.ResourceType]["daily_rate"] = 0.0
+				data.CombinedCosts[result.ResourceType]["monthly_rate"] = 0.0
+				data.CombinedCosts[result.ResourceType]["yearly_rate"] = 0.0
+				data.CombinedCosts[result.ResourceType]["lifetime"] = 0.0
 			}
 
-			// Debug combined costs after adding
-			logging.Debug("Current combined costs", map[string]interface{}{
-				"resource_type": result.ResourceType,
-				"costs":        data.CombinedCosts[result.ResourceType],
-			})
+			// Update resource type totals
+			if hourly, ok := result.Cost["hourly_rate"].(float64); ok {
+				current, _ := data.CombinedCosts[result.ResourceType]["hourly_rate"].(float64)
+				data.CombinedCosts[result.ResourceType]["hourly_rate"] = current + hourly
+				totalHourly += hourly
+			}
+			if daily, ok := result.Cost["daily_rate"].(float64); ok {
+				current, _ := data.CombinedCosts[result.ResourceType]["daily_rate"].(float64)
+				data.CombinedCosts[result.ResourceType]["daily_rate"] = current + daily
+				totalDaily += daily
+			}
+			if monthly, ok := result.Cost["monthly_rate"].(float64); ok {
+				current, _ := data.CombinedCosts[result.ResourceType]["monthly_rate"].(float64)
+				data.CombinedCosts[result.ResourceType]["monthly_rate"] = current + monthly
+				totalMonthly += monthly
+			}
+			if yearly, ok := result.Cost["yearly_rate"].(float64); ok {
+				current, _ := data.CombinedCosts[result.ResourceType]["yearly_rate"].(float64)
+				data.CombinedCosts[result.ResourceType]["yearly_rate"] = current + yearly
+				totalYearly += yearly
+			}
+			if lifetime, ok := result.Cost["lifetime"].(float64); ok && result.ResourceType != "Elastic IPs" && result.ResourceType != "Load Balancers" {
+				current, _ := data.CombinedCosts[result.ResourceType]["lifetime"].(float64)
+				data.CombinedCosts[result.ResourceType]["lifetime"] = current + lifetime
+				totalLifetime += lifetime
+			}
 		}
 
 		// Add to resources list
@@ -218,6 +224,7 @@ func processResults(results []aws.ScanResult) TemplateData {
 		TotalScans:        totalScans,
 		AvgScansPerSecond: avgScansPerSecond,
 		TotalRunTime:      totalRunTime,
+		CompletedAt:       time.Now(),
 		TotalHourly:       totalHourly,
 		TotalDaily:        totalDaily,
 		TotalMonthly:      totalMonthly,

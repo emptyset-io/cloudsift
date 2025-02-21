@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
 )
@@ -97,22 +98,16 @@ func listCurrentAccount() ([]Account, error) {
 		}, nil
 	}
 
-	// If we can't get the name from Organizations API, try to get it from account alias
-	iamSvc := sts.New(sess)
-	aliasResult, err := iamSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-	if err == nil && aliasResult.Arn != nil {
-		// Extract account alias from ARN if available
-		arn := aws.StringValue(aliasResult.Arn)
-		if arnParts := strings.Split(arn, ":"); len(arnParts) >= 6 {
-			if userParts := strings.Split(arnParts[5], "/"); len(userParts) >= 2 {
-				return []Account{
-					{
-						ID:   accountID,
-						Name: userParts[1], // Use the IAM user/role name as a fallback
-					},
-				}, nil
-			}
-		}
+	// If we can't get the name from Organizations API, try to get the account alias
+	iamSvc := iam.New(sess)
+	aliasResult, err := iamSvc.ListAccountAliases(&iam.ListAccountAliasesInput{})
+	if err == nil && len(aliasResult.AccountAliases) > 0 {
+		return []Account{
+			{
+				ID:   accountID,
+				Name: aws.StringValue(aliasResult.AccountAliases[0]),
+			},
+		}, nil
 	}
 
 	// If all else fails, use a generic name based on the account type
