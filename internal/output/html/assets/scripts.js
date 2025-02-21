@@ -410,19 +410,6 @@ function displayLocalReportTime() {
     }
 }
 
-// Convert timestamps to local time
-function convertTimestamps() {
-    const timestampCells = document.querySelectorAll('td:nth-child(5)'); // Last Used column
-    timestampCells.forEach(cell => {
-        const timestamp = cell.textContent.trim();
-        if (timestamp && timestamp !== 'N/A') {
-            const date = new Date(timestamp);
-            if (!isNaN(date)) {
-                cell.textContent = date.toLocaleString();
-            }
-        }
-    });
-}
 
 // Filter resources based on account, region, or resource type
 function filterResources(filterType, value) {
