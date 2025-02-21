@@ -317,7 +317,7 @@ func (s *ELBScanner) calculateELBCosts(lbType string) *awslib.CostBreakdown {
 // Scan implements Scanner interface
 func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Create base session
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,

@@ -37,8 +37,8 @@ func (s *SecurityGroupScanner) Label() string {
 
 // Scan implements Scanner interface
 func (s *SecurityGroupScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Create base session
+	sess, err := awslib.GetScannerSession(opts)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
