@@ -193,58 +193,81 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 			continue
 		}
 
+		// Safely get table values with nil checks
+		var (
+			itemCount      int64
+			tableSizeBytes int64
+			readCapacity   int64
+			writeCapacity  int64
+		)
+
+		if tableDesc.Table != nil {
+			if tableDesc.Table.ItemCount != nil {
+				itemCount = aws.Int64Value(tableDesc.Table.ItemCount)
+			}
+			if tableDesc.Table.TableSizeBytes != nil {
+				tableSizeBytes = aws.Int64Value(tableDesc.Table.TableSizeBytes)
+			}
+			if tableDesc.Table.ProvisionedThroughput != nil {
+				if tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits != nil {
+					readCapacity = aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits)
+				}
+				if tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits != nil {
+					writeCapacity = aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits)
+				}
+			}
+		}
+
 		// Determine if table is unused/underutilized
-		reasons := s.determineUnusedReasons(metrics,
-			aws.Int64Value(tableDesc.Table.ItemCount),
-			aws.Int64Value(tableDesc.Table.TableSizeBytes),
-			aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
-			aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits),
-			opts)
+		reasons := s.determineUnusedReasons(metrics, itemCount, tableSizeBytes, readCapacity, writeCapacity, opts)
 
 		if len(reasons) > 0 {
-			// Calculate cost
-			costConfig := awslib.ResourceCostConfig{
-				ResourceType: "DynamoDB",
-				ResourceSize: tableDesc.Table.TableSizeBytes,
-				Region:       opts.Region,
-				CreationTime: aws.TimeValue(tableDesc.Table.CreationDateTime),
-			}
+			// Calculate cost if possible
+			var monthlyCost float64
+			var err error
 
-			cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig)
+			// Try to get cost, but don't fail if pricing info isn't available
+			monthlyCost, err = utils.GetDynamoDBCost(tableSizeBytes, readCapacity, writeCapacity, opts.Region)
 			if err != nil {
 				logging.Error("Failed to calculate cost", err, map[string]interface{}{
 					"table_name": *tableName,
 				})
+				// Continue with cost as 0 if we can't calculate it
+				monthlyCost = 0
 			}
 
+			// Create details map with DynamoDB-specific fields
 			details := map[string]interface{}{
-				"ItemCount":        aws.Int64Value(tableDesc.Table.ItemCount),
-				"TableSizeBytes":   aws.Int64Value(tableDesc.Table.TableSizeBytes),
-				"ReadThroughput":   metrics["read_throughput"],
-				"WriteThroughput": metrics["write_throughput"],
-				"ThrottledEvents": metrics["throttled_events"],
-				"account_id":      accountID,
-				"region":         opts.Region,
-				"BillingMode":    aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode),
-				"ProvisionedRead": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
-				"ProvisionedWrite": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits),
+				"TableName":          *tableName,
+				"ItemCount":          itemCount,
+				"TableSizeBytes":     tableSizeBytes,
+				"TableSizeGB":        float64(tableSizeBytes) / (1024 * 1024 * 1024),
+				"ReadCapacityUnits":  readCapacity,
+				"WriteCapacityUnits": writeCapacity,
+				"ReadThroughput":     metrics["read_throughput"],
+				"WriteThroughput":    metrics["write_throughput"],
+				"ThrottledEvents":    metrics["throttled_events"],
+				"MonthlyCost":        monthlyCost,
 			}
 
-			if cost != nil {
-				details["Cost"] = cost
-			}
+			// Create resource ARN
+			resourceARN := fmt.Sprintf("arn:aws:dynamodb:%s:%s:table/%s",
+				opts.Region, accountID, *tableName)
 
-			result := awslib.ScanResult{
+			results = append(results, awslib.ScanResult{
 				ResourceType: s.Label(),
 				ResourceName: *tableName,
-				ResourceID:   *tableName,
+				ResourceID:   resourceARN,
 				Reason:      strings.Join(reasons, "\n"),
 				Details:     details,
-			}
-
-			results = append(results, result)
+			})
 		}
 	}
+
+	logging.Debug("Completed DynamoDB tables scan", map[string]interface{}{
+		"total_tables": len(tableNames),
+		"account_id":   accountID,
+	})
 
 	return results, nil
 }
