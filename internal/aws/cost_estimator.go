@@ -327,9 +327,6 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		if !ok {
 			return 0, fmt.Errorf("invalid resource size type for %s: %T", resourceType, config.ResourceSize)
 		}
-		if config.VolumeType == "" {
-			return 0, fmt.Errorf("volume type is required for %s", resourceType)
-		}
 
 		filters = []*pricing.Filter{
 			{
@@ -340,7 +337,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			{
 				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("productFamily"),
-				Value: aws.String("Storage Snapshot"),
+				Value: aws.String("Storage"),
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
@@ -349,8 +346,13 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("storageMedia"),
-				Value: aws.String("Amazon S3"),
+				Field: aws.String("usagetype"),
+				Value: aws.String("EBS:SnapshotUsage"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("volumeType"),
+				Value: aws.String("Snapshot"),
 			},
 		}
 
