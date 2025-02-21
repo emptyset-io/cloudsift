@@ -102,23 +102,23 @@ func (s *EC2InstanceScanner) fetchMetric(cwClient *cloudwatch.CloudWatch, namesp
 }
 
 // analyzeInstanceUsage checks if an instance is underutilized
-func (s *EC2InstanceScanner) analyzeInstanceUsage(cwClient *cloudwatch.CloudWatch, instance *ec2.Instance, startTime, endTime time.Time, daysUnused int) ([]string, error) {
+func (s *EC2InstanceScanner) analyzeInstanceUsage(clients *utils.ServiceClients, instance *ec2.Instance, startTime, endTime time.Time, daysUnused int) ([]string, error) {
 	instanceID := aws.StringValue(instance.InstanceId)
 	var reasons []string
 
 	// Fetch CPU Usage
-	cpuUsage, err := s.fetchMetric(cwClient, "AWS/EC2", instanceID, "InstanceId", "CPUUtilization", "Average", startTime, endTime)
+	cpuUsage, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "CPUUtilization", "Average", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch CPU metrics: %w", err)
 	}
 
 	// Fetch Network Traffic
-	networkIn, err := s.fetchMetric(cwClient, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsIn", "Sum", startTime, endTime)
+	networkIn, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsIn", "Sum", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch NetworkIn metrics: %w", err)
 	}
 
-	networkOut, err := s.fetchMetric(cwClient, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsOut", "Sum", startTime, endTime)
+	networkOut, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsOut", "Sum", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch NetworkOut metrics: %w", err)
 	}
@@ -207,13 +207,12 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	// Create service clients
 	clients := utils.CreateServiceClients(sess)
-	ec2Client := ec2.New(sess) // Keep direct EC2 client for backward compatibility
 
 	// Get instances
 	var results awslib.ScanResults
 	endTime := time.Now().UTC()
 	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
-	err = ec2Client.DescribeInstancesPages(&ec2.DescribeInstancesInput{},
+	err = clients.EC2.DescribeInstancesPages(&ec2.DescribeInstancesInput{},
 		func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
 			for _, reservation := range page.Reservations {
 				for _, instance := range reservation.Instances {
@@ -252,7 +251,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						reasons = append(reasons, fmt.Sprintf("Non-running state: %s for %d days", instanceState, ageInDays))
 					} else {
 						// Analyze running instances using launch time
-						reasons, err = s.analyzeInstanceUsage(clients.CloudWatch, instance, startTime, endTime, opts.DaysUnused)
+						reasons, err = s.analyzeInstanceUsage(clients, instance, startTime, endTime, opts.DaysUnused)
 						if err != nil {
 							logging.Error("Failed to analyze instance usage", err, map[string]interface{}{
 								"instance_id": aws.StringValue(instance.InstanceId),
@@ -266,7 +265,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					}
 
 					// Get EBS volumes
-					ebsDetails, err = s.getEBSVolumes(ec2Client, instance, hoursRunning)
+					ebsDetails, err = s.getEBSVolumes(clients.EC2, instance, hoursRunning)
 					if err != nil {
 						logging.Error("Failed to get EBS volumes", err, map[string]interface{}{
 							"instance_id": aws.StringValue(instance.InstanceId),

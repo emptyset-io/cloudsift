@@ -54,12 +54,12 @@ func (s *SecurityGroupScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create EC2 client
-	ec2Client := ec2.New(sess)
+	// Create service clients
+	clients := utils.CreateServiceClients(sess)
 
 	// Get all security groups
 	var securityGroups []*ec2.SecurityGroup
-	err = ec2Client.DescribeSecurityGroupsPages(&ec2.DescribeSecurityGroupsInput{},
+	err = clients.EC2.DescribeSecurityGroupsPages(&ec2.DescribeSecurityGroupsInput{},
 		func(page *ec2.DescribeSecurityGroupsOutput, lastPage bool) bool {
 			securityGroups = append(securityGroups, page.SecurityGroups...)
 			return !lastPage
@@ -96,7 +96,7 @@ func (s *SecurityGroupScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults
 		}
 
 		var associations []*ec2.NetworkInterface
-		err = ec2Client.DescribeNetworkInterfacesPages(input,
+		err = clients.EC2.DescribeNetworkInterfacesPages(input,
 			func(page *ec2.DescribeNetworkInterfacesOutput, lastPage bool) bool {
 				associations = append(associations, page.NetworkInterfaces...)
 				return !lastPage
