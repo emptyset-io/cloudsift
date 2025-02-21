@@ -40,7 +40,7 @@ func (s *EC2InstanceScanner) Label() string {
 }
 
 // fetchMetric gets CloudWatch metrics for a given resource
-func (s *EC2InstanceScanner) fetchMetric(cwClient *cloudwatch.CloudWatch, namespace, resourceID, dimensionName, metricName, stat string, startTime, endTime time.Time) ([]float64, error) {
+func (s *EC2InstanceScanner) fetchMetric(clients *utils.ServiceClients, namespace, resourceID, dimensionName, metricName, stat string, startTime, endTime time.Time) ([]float64, error) {
 	// Ensure start time is before end time and they're not equal
 	if startTime.Equal(endTime) {
 		startTime = startTime.Add(-1 * time.Hour)
@@ -84,7 +84,7 @@ func (s *EC2InstanceScanner) fetchMetric(cwClient *cloudwatch.CloudWatch, namesp
 		EndTime:   aws.Time(config.EndTime),
 	}
 
-	result, err := cwClient.GetMetricData(input)
+	result, err := clients.CloudWatch.GetMetricData(input)
 	if err != nil {
 		return nil, err
 	}
@@ -107,18 +107,18 @@ func (s *EC2InstanceScanner) analyzeInstanceUsage(clients *utils.ServiceClients,
 	var reasons []string
 
 	// Fetch CPU Usage
-	cpuUsage, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "CPUUtilization", "Average", startTime, endTime)
+	cpuUsage, err := s.fetchMetric(clients, "AWS/EC2", instanceID, "InstanceId", "CPUUtilization", "Average", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch CPU metrics: %w", err)
 	}
 
 	// Fetch Network Traffic
-	networkIn, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsIn", "Sum", startTime, endTime)
+	networkIn, err := s.fetchMetric(clients, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsIn", "Sum", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch NetworkIn metrics: %w", err)
 	}
 
-	networkOut, err := s.fetchMetric(clients.CloudWatch, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsOut", "Sum", startTime, endTime)
+	networkOut, err := s.fetchMetric(clients, "AWS/EC2", instanceID, "InstanceId", "NetworkPacketsOut", "Sum", startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch NetworkOut metrics: %w", err)
 	}
@@ -154,7 +154,7 @@ func (s *EC2InstanceScanner) analyzeInstanceUsage(clients *utils.ServiceClients,
 }
 
 // getEBSVolumes gets the EBS volumes attached to an instance
-func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Instance, hoursRunning float64) ([]map[string]interface{}, error) {
+func (s *EC2InstanceScanner) getEBSVolumes(clients *utils.ServiceClients, instance *ec2.Instance, hoursRunning float64) ([]map[string]interface{}, error) {
 	var ebsDetails []map[string]interface{}
 
 	for _, blockDevice := range instance.BlockDeviceMappings {
@@ -167,7 +167,7 @@ func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Ins
 			VolumeIds: []*string{aws.String(volumeID)},
 		}
 
-		result, err := ec2Client.DescribeVolumes(input)
+		result, err := clients.EC2.DescribeVolumes(input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to describe volume %s: %w", volumeID, err)
 		}
@@ -265,7 +265,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					}
 
 					// Get EBS volumes
-					ebsDetails, err = s.getEBSVolumes(clients.EC2, instance, hoursRunning)
+					ebsDetails, err = s.getEBSVolumes(clients, instance, hoursRunning)
 					if err != nil {
 						logging.Error("Failed to get EBS volumes", err, map[string]interface{}{
 							"instance_id": aws.StringValue(instance.InstanceId),
