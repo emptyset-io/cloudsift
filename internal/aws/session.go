@@ -42,7 +42,7 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 	return session.NewSession(cfg.WithCredentials(creds))
 }
 
-// GetScannerSession creates a new AWS session for scanning, using organization role if provided
+// GetScannerSession creates a new AWS session for scanning
 func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 	cfg := aws.NewConfig()
 	if opts.Region != "" {
@@ -55,56 +55,43 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
-	// If organization role is set, assume it first
-	if opts.OrganizationRole != "" {
-		// Get organization account ID from base session
-		svc := sts.New(sess)
-		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller identity: %w", err)
-		}
-		orgAccountID := *identity.Account
-
-		// Assume organization role in the organization account
-		orgRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", orgAccountID, opts.OrganizationRole)
-		orgCreds := stscreds.NewCredentials(sess, orgRoleARN)
-		orgSess, err := session.NewSession(cfg.WithCredentials(orgCreds))
-		if err != nil {
-			return nil, fmt.Errorf("failed to assume organization role: %w", err)
-		}
-
-		// If scanner role is specified, use org role session to assume scanner role in target account
-		if opts.Role != "" {
-			// Use target account ID if provided, otherwise default to org account
-			targetAccountID := opts.TargetAccountID
-			if targetAccountID == "" {
-				targetAccountID = orgAccountID
-			}
-
-			// Now assume the scanner role in the target account using the org role session
-			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, opts.Role)
-			scannerCreds := stscreds.NewCredentials(orgSess, scannerRoleARN)
-			return session.NewSession(cfg.WithCredentials(scannerCreds))
-		}
-
-		return orgSess, nil
+	// If no scanner role specified, return base session
+	if opts.Role == "" {
+		return sess, nil
 	}
 
-	// If no organization role but scanner role specified, assume scanner role directly in current account
-	if opts.Role != "" {
-		svc := sts.New(sess)
-		identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller identity: %w", err)
-		}
-		currentAccountID := *identity.Account
+	// If target account specified but no organization role, we can't do cross-account access
+	if opts.TargetAccountID != "" && opts.OrganizationRole == "" {
+		return nil, fmt.Errorf("organization role is required for cross-account access")
+	}
 
+	// Get current account ID
+	svc := sts.New(sess)
+	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+	currentAccountID := *identity.Account
+
+	// If scanning current account, assume scanner role directly
+	if opts.TargetAccountID == "" || opts.TargetAccountID == currentAccountID {
 		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", currentAccountID, opts.Role)
 		creds := stscreds.NewCredentials(sess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
 	}
 
-	return sess, nil
+	// For cross-account access, first assume organization role in current account
+	orgRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", currentAccountID, opts.OrganizationRole)
+	orgCreds := stscreds.NewCredentials(sess, orgRoleARN)
+	orgSess, err := session.NewSession(cfg.WithCredentials(orgCreds))
+	if err != nil {
+		return nil, fmt.Errorf("failed to assume organization role: %w", err)
+	}
+
+	// Then use organization role to assume scanner role in target account
+	scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", opts.TargetAccountID, opts.Role)
+	scannerCreds := stscreds.NewCredentials(orgSess, scannerRoleARN)
+	return session.NewSession(cfg.WithCredentials(scannerCreds))
 }
 
 // AssumeRole creates a new session by assuming the specified role in the target account
