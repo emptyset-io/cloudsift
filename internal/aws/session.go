@@ -74,3 +74,21 @@ func AssumeRoleFromOrganization(targetAccountID, organizationRole, scannerRole s
 	creds := stscreds.NewCredentials(orgSess, roleARN)
 	return session.NewSession(aws.NewConfig().WithCredentials(creds).WithRegion(region))
 }
+
+// GetScannerSession creates a session for scanning by assuming the scanner role in the target account
+// using the organization role session
+func GetScannerSession(opts ScanOptions) (*session.Session, error) {
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no organization session provided")
+	}
+
+	// Use the organization role session to assume the scanner role in the target account
+	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", opts.AccountID, opts.Role)
+	creds := stscreds.NewCredentials(opts.Session, roleARN)
+	
+	// Create new session with the assumed role credentials and region
+	return session.NewSession(&aws.Config{
+		Credentials: creds,
+		Region:     aws.String(opts.Region),
+	})
+}

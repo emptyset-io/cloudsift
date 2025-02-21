@@ -196,22 +196,12 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				tasks = append(tasks, worker.Task(func(ctx context.Context) error {
 					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
-					// Create scanner session for this account and region
-					scannerSess := accountsResult.Session
-					if scannerSess == nil {
-						logging.Error("No organization session available", nil, nil)
-						return fmt.Errorf("no organization session available")
-					}
-
-					// Update the region for this scan
-					scannerSess = scannerSess.Copy()
-					scannerSess.Config.Region = &region
-
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
+						Role:       opts.scannerRole,
 						AccountID:  account.ID,
-						Session:    scannerSess,
+						Session:    accountsResult.Session,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
