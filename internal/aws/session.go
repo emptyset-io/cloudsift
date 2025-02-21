@@ -29,8 +29,9 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 		return sess, nil
 	}
 
-	// If organization role is set, use it to assume the target role
-	if config.Config.OrganizationRole != "" {
+	// If organization role is set and we're trying to assume the scanner role,
+	// use the organization role first
+	if config.Config.OrganizationRole != "" && role == config.Config.ScannerRole {
 		// First assume the organization role
 		orgSess, err := AssumeRole("", config.Config.OrganizationRole, sess)
 		if err != nil {
@@ -44,13 +45,13 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 			return nil, fmt.Errorf("failed to get caller identity: %w", err)
 		}
 
-		// Now assume the target role from the organization role session
+		// Now assume the scanner role from the organization role session
 		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, role)
 		creds := stscreds.NewCredentials(orgSess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
 	}
 
-	// If no organization role, assume role directly
+	// If no organization role or different role, assume role directly
 	svc := sts.New(sess)
 	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
