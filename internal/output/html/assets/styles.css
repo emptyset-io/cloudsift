@@ -279,26 +279,31 @@ tr:hover {
     color: var(--text-secondary);
 }
 
-#clear-search {
-    padding: 0.75rem 1.5rem;
-    background-color: var(--accent);
-    border: none;
-    border-radius: var(--border-radius);
-    color: white;
-    cursor: pointer;
-    transition: var(--transition);
-    display: flex;
+/* Button Styles */
+.btn {
+    display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: var(--transition);
 }
 
-#clear-search:hover {
+.btn:hover {
     background-color: var(--accent-medium);
 }
 
-#clear-search svg {
+.btn svg {
     width: 1rem;
     height: 1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 /* Resource Type Count Links */
@@ -465,12 +470,19 @@ th.sorted-desc .sort-icon {
     height: 1.5rem;
 }
 
-.modal pre {
-    background-color: var(--accent-light);
-    padding: 1rem;
+.modal-content pre {
+    background-color: var(--primary-bg);
     border-radius: var(--border-radius);
-    overflow-x: auto;
+    padding: 16px;
     margin: 0;
+    overflow: auto;
+    max-height: 60vh;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
 }
 
 /* Stats Cards */

@@ -2,10 +2,8 @@ package aws
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
 )
@@ -19,52 +17,8 @@ type Account struct {
 // ListAccounts attempts to list all accounts in the organization, falling back to current account if not in an org
 // If organizationRole is provided, assumes that role before listing accounts
 func ListAccounts(organizationRole string) ([]Account, error) {
-	// If organization role provided, try to list organization accounts
-	if organizationRole != "" {
-		orgAccounts, err := tryListOrganizationAccounts(organizationRole)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list organization accounts with role %s: %w", organizationRole, err)
-		}
-		return orgAccounts, nil
-	}
-
-	// If no organization role, fall back to current account
-	return listCurrentAccount()
-}
-
-// tryListOrganizationAccounts attempts to list all accounts in the organization
-func tryListOrganizationAccounts(organizationRole string) ([]Account, error) {
-	// Create session with organization role in us-west-2 (Organizations API requires a region)
-	sess, err := GetSession(organizationRole, "us-west-2")
-	if err != nil {
-		return nil, err
-	}
-
-	svc := organizations.New(sess)
-	input := &organizations.ListAccountsInput{}
-
-	var accounts []Account
-	err = svc.ListAccountsPages(input, func(page *organizations.ListAccountsOutput, lastPage bool) bool {
-		for _, account := range page.Accounts {
-			accounts = append(accounts, Account{
-				ID:   aws.StringValue(account.Id),
-				Name: aws.StringValue(account.Name),
-			})
-		}
-		return !lastPage
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list organization accounts: %w", err)
-	}
-
-	return accounts, nil
-}
-
-// listCurrentAccount gets the current account information
-func listCurrentAccount() ([]Account, error) {
 	// First get current account ID
-	sess, err := GetSession("")
+	sess, err := GetSession("", "")
 	if err != nil {
 		return nil, err
 	}
@@ -77,53 +31,68 @@ func listCurrentAccount() ([]Account, error) {
 
 	accountID := aws.StringValue(identity.Account)
 
-	// Try to get account name from Organizations API
-	orgSess, err := GetSession("", "us-west-2") // Organizations API requires a region
+	// Create session for Organizations API in us-west-2 (Organizations API requires a region)
+	orgSess, err := GetSession(organizationRole, "us-west-2")
 	if err != nil {
 		return nil, err
 	}
 
 	orgSvc := organizations.New(orgSess)
-	describeResult, err := orgSvc.DescribeAccount(&organizations.DescribeAccountInput{
-		AccountId: aws.String(accountID),
+
+	// If organization role provided, try to list all accounts
+	if organizationRole != "" {
+		accounts, err := listOrganizationAccounts(orgSvc)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list organization accounts: %w", err)
+		}
+		return accounts, nil
+	}
+
+	// If no organization role, just get the current account name from Organizations API
+	account, err := getAccountFromOrganization(orgSvc, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account from organization: %w", err)
+	}
+	return []Account{account}, nil
+}
+
+// listOrganizationAccounts lists all accounts in the organization
+func listOrganizationAccounts(svc *organizations.Organizations) ([]Account, error) {
+	input := &organizations.ListAccountsInput{}
+	var accounts []Account
+
+	err := svc.ListAccountsPages(input, func(page *organizations.ListAccountsOutput, lastPage bool) bool {
+		for _, account := range page.Accounts {
+			accounts = append(accounts, Account{
+				ID:   aws.StringValue(account.Id),
+				Name: aws.StringValue(account.Name),
+			})
+		}
+		return !lastPage
 	})
 
-	// If we can get the account name from Organizations API, use it
-	if err == nil && describeResult.Account != nil && describeResult.Account.Name != nil {
-		return []Account{
-			{
-				ID:   accountID,
-				Name: aws.StringValue(describeResult.Account.Name),
-			},
-		}, nil
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %w", err)
 	}
 
-	// If we can't get the name from Organizations API, try to get the account alias
-	iamSvc := iam.New(sess)
-	aliasResult, err := iamSvc.ListAccountAliases(&iam.ListAccountAliasesInput{})
-	if err == nil && len(aliasResult.AccountAliases) > 0 {
-		return []Account{
-			{
-				ID:   accountID,
-				Name: aws.StringValue(aliasResult.AccountAliases[0]),
-			},
-		}, nil
+	return accounts, nil
+}
+
+// getAccountFromOrganization gets a single account's details from Organizations API
+func getAccountFromOrganization(svc *organizations.Organizations, accountID string) (Account, error) {
+	describeResult, err := svc.DescribeAccount(&organizations.DescribeAccountInput{
+		AccountId: aws.String(accountID),
+	})
+	if err != nil {
+		return Account{}, fmt.Errorf("failed to describe account: %w", err)
 	}
 
-	// If all else fails, use a generic name based on the account type
-	if strings.Contains(aws.StringValue(identity.Arn), ":root") {
-		return []Account{
-			{
-				ID:   accountID,
-				Name: "Root Account",
-			},
-		}, nil
+	if describeResult.Account == nil || describeResult.Account.Name == nil {
+		return Account{}, fmt.Errorf("no account details found")
 	}
 
-	return []Account{
-		{
-			ID:   accountID,
-			Name: "Member Account",
-		},
+	return Account{
+		ID:   accountID,
+		Name: aws.StringValue(describeResult.Account.Name),
 	}, nil
 }

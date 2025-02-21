@@ -337,54 +337,41 @@ function scrollToUnusedResources(event, resourceType) {
 }
 
 // Modal Functions
-function showDetailsModal(resourceId, resourceType, details) {
+function showDetailsModal(details) {
     const modal = document.getElementById('details-modal');
-    const overlay = document.getElementById('details-modal-overlay');
-    const modalTitle = modal.querySelector('.modal-title');
-    const modalDetails = document.getElementById('modal-details');
-
+    const codeBlock = document.getElementById('json-content');
+    
     try {
-        const formattedDetails = JSON.stringify(JSON.parse(details), null, 2);
-        modalTitle.innerHTML = `
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
-            </svg>
-            ${resourceType} Details
-        `;
-        modalDetails.textContent = formattedDetails;
+        // Format the JSON nicely
+        const formattedJson = JSON.stringify(details, null, 2);
+        codeBlock.textContent = formattedJson;
+        modal.style.display = 'block';
     } catch (e) {
-        modalDetails.textContent = details;
+        console.error('Error formatting JSON:', e);
+        codeBlock.textContent = 'Error: Could not format JSON data';
+        modal.style.display = 'block';
     }
-
-    modal.style.display = 'block';
-    overlay.style.display = 'block';
-    document.body.style.overflow = 'hidden';
 }
 
 function closeDetailsModal() {
     const modal = document.getElementById('details-modal');
-    const overlay = document.getElementById('details-modal-overlay');
-    
     modal.style.display = 'none';
-    overlay.style.display = 'none';
-    document.body.style.overflow = '';
 }
 
 function setupModalListeners() {
     // Close modal when clicking outside
-    document.getElementById('details-modal-overlay').addEventListener('click', closeDetailsModal);
-
-    // Prevent modal close when clicking inside the modal
-    document.getElementById('details-modal').addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
-
-    // Setup search input listener
-    document.getElementById('search-input').addEventListener('input', filterTable);
+    window.onclick = function(event) {
+        const modal = document.getElementById('details-modal');
+        if (event.target == modal) {
+            closeDetailsModal();
+        }
+    };
+    
+    // Close modal when clicking the close button
+    const closeBtn = document.querySelector('.close-modal');
+    if (closeBtn) {
+        closeBtn.onclick = closeDetailsModal;
+    }
 }
 
 // Add tooltips for N/A values
@@ -421,20 +408,6 @@ function displayLocalReportTime() {
         const localTime = convertToLocalTime(utcTime * 1000); // Convert seconds to milliseconds
         reportTimeElement.textContent = `${localTime}`;
     }
-}
-
-// Initialize tooltips
-function initializeTooltips() {
-    const tooltips = document.querySelectorAll('.tooltip');
-    tooltips.forEach(tooltip => {
-        const text = tooltip.querySelector('.tooltiptext');
-        if (text) {
-            tooltip.addEventListener('mousemove', (e) => {
-                text.style.left = `${e.clientX}px`;
-                text.style.top = `${e.clientY - 10}px`;
-            });
-        }
-    });
 }
 
 // Convert timestamps to local time
@@ -521,7 +494,7 @@ function exportToCSV() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'unused_resources.csv');
+    link.setAttribute('download', 'cloudsift_scan_report.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

@@ -3,6 +3,7 @@ package html
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -36,11 +37,6 @@ type ScanMetrics struct {
 	AvgScansPerSecond float64   `json:"avg_scans_per_second"`
 	TotalRunTime      float64   `json:"total_run_time"`
 	CompletedAt       time.Time `json:"completed_at"`
-	TotalHourly       float64   `json:"total_hourly"`
-	TotalDaily        float64   `json:"total_daily"`
-	TotalMonthly      float64   `json:"total_monthly"`
-	TotalYearly       float64   `json:"total_yearly"`
-	TotalLifetime     float64   `json:"total_lifetime"`
 }
 
 // Resource represents a single resource in the scan results
@@ -52,7 +48,7 @@ type Resource struct {
 	Name         string
 	ResourceID   string
 	Reason       string
-	Details      string
+	DetailsJSON  template.JS // JSON-formatted details for display
 }
 
 // WriteHTML writes scan results to an HTML file
@@ -75,6 +71,27 @@ func WriteHTML(results []aws.ScanResult, outputPath string, metrics ScanMetrics)
 		"formatYearlyCost":   formatYearlyCost,
 		"formatLifetimeCost": formatLifetimeCost,
 		"formatDuration":     formatDuration,
+		"add": func(a, b interface{}) float64 {
+			// Convert both values to float64
+			var aFloat, bFloat float64
+			switch v := a.(type) {
+			case float64:
+				aFloat = v
+			case int:
+				aFloat = float64(v)
+			case int64:
+				aFloat = float64(v)
+			}
+			switch v := b.(type) {
+			case float64:
+				bFloat = v
+			case int:
+				bFloat = float64(v)
+			case int64:
+				bFloat = float64(v)
+			}
+			return aFloat + bFloat
+		},
 	}).ParseFS(content, "templates/scan_report.html")
 	if err != nil {
 		return fmt.Errorf("error parsing template: %v", err)
@@ -93,8 +110,9 @@ func WriteHTML(results []aws.ScanResult, outputPath string, metrics ScanMetrics)
 
 	// Process the scan results
 	data := processResults(results)
-	data.ScanMetrics = metrics
-	data.ScanMetrics.CompletedAt = time.Now()
+	data.ScanMetrics.AvgScansPerSecond = metrics.AvgScansPerSecond
+	data.ScanMetrics.TotalRunTime = metrics.TotalRunTime
+	data.ScanMetrics.CompletedAt = metrics.CompletedAt
 	data.Styles = template.CSS(styles)
 	data.Scripts = template.JS(scripts)
 
@@ -127,84 +145,119 @@ func WriteHTML(results []aws.ScanResult, outputPath string, metrics ScanMetrics)
 func processResults(results []aws.ScanResult) TemplateData {
 	data := TemplateData{
 		AccountsAndRegions: make(map[string][]string),
-		AccountNames:       make(map[string]string),
+		AccountNames:      make(map[string]string),
 		ResourceTypeCounts: make(map[string]int),
 		CombinedCosts:     make(map[string]map[string]interface{}),
 		Resources:         make([]Resource, 0),
+		ScanMetrics: ScanMetrics{
+			TotalScans:        len(results),
+			AvgScansPerSecond: 0, // Will be set by caller
+			TotalRunTime:      0, // Will be set by caller
+			CompletedAt:       time.Now(),
+		},
 	}
-
-	// Initialize metrics
-	var totalHourly, totalDaily, totalMonthly, totalYearly, totalLifetime float64
-
-	startTime := time.Now()
-	totalScans := len(results)
-	avgScansPerSecond := float64(totalScans) / time.Since(startTime).Seconds()
-	totalRunTime := time.Since(startTime).Seconds()
 
 	// Process each result
 	for _, result := range results {
-		// Get account and region info from Details
-		accountID, _ := result.Details["account_id"].(string)
-		accountName, _ := result.Details["account_name"].(string)
-		region, _ := result.Details["region"].(string)
+		// Extract account ID and region
+		accountID := ""
+		accountName := ""
+		region := ""
 
-		// Add account and region info
-		if accountID != "" && region != "" {
+		if details, ok := result.Details["account_id"].(string); ok {
+			accountID = details
+		}
+		if details, ok := result.Details["account_name"].(string); ok {
+			accountName = details
+		}
+		if details, ok := result.Details["region"].(string); ok {
+			region = details
+		}
+
+		// Update account mappings
+		if accountID != "" {
+			data.AccountNames[accountID] = accountName
 			if !contains(data.AccountsAndRegions[accountID], region) {
 				data.AccountsAndRegions[accountID] = append(data.AccountsAndRegions[accountID], region)
 			}
 		}
 
-		// Store account name mapping
-		if accountID != "" && accountName != "" {
-			data.AccountNames[accountID] = accountName
-		}
-
-		// Add resource type count
+		// Update resource type counts
 		data.ResourceTypeCounts[result.ResourceType]++
 
-		// Add costs to combined costs
+		// Process costs
 		if result.Cost != nil {
-			if _, exists := data.CombinedCosts[result.ResourceType]; !exists {
-				data.CombinedCosts[result.ResourceType] = make(map[string]interface{})
-				data.CombinedCosts[result.ResourceType]["hourly_rate"] = 0.0
-				data.CombinedCosts[result.ResourceType]["daily_rate"] = 0.0
-				data.CombinedCosts[result.ResourceType]["monthly_rate"] = 0.0
-				data.CombinedCosts[result.ResourceType]["yearly_rate"] = 0.0
-				data.CombinedCosts[result.ResourceType]["lifetime"] = 0.0
-			}
+			if total, ok := result.Cost["total"].(*aws.CostBreakdown); ok && total != nil {
+				// Initialize cost map for resource type if not exists
+				if _, exists := data.CombinedCosts[result.ResourceType]; !exists {
+					data.CombinedCosts[result.ResourceType] = map[string]interface{}{
+						"hourly_rate":   0.0,
+						"daily_rate":    0.0,
+						"monthly_rate":  0.0,
+						"yearly_rate":   0.0,
+						"lifetime":      0.0,
+						"hours_running": 0.0,
+					}
+				}
 
-			// Update resource type totals
-			if hourly, ok := result.Cost["hourly_rate"].(float64); ok {
-				current, _ := data.CombinedCosts[result.ResourceType]["hourly_rate"].(float64)
-				data.CombinedCosts[result.ResourceType]["hourly_rate"] = current + hourly
-				totalHourly += hourly
-			}
-			if daily, ok := result.Cost["daily_rate"].(float64); ok {
-				current, _ := data.CombinedCosts[result.ResourceType]["daily_rate"].(float64)
-				data.CombinedCosts[result.ResourceType]["daily_rate"] = current + daily
-				totalDaily += daily
-			}
-			if monthly, ok := result.Cost["monthly_rate"].(float64); ok {
-				current, _ := data.CombinedCosts[result.ResourceType]["monthly_rate"].(float64)
-				data.CombinedCosts[result.ResourceType]["monthly_rate"] = current + monthly
-				totalMonthly += monthly
-			}
-			if yearly, ok := result.Cost["yearly_rate"].(float64); ok {
-				current, _ := data.CombinedCosts[result.ResourceType]["yearly_rate"].(float64)
-				data.CombinedCosts[result.ResourceType]["yearly_rate"] = current + yearly
-				totalYearly += yearly
-			}
-			if lifetime, ok := result.Cost["lifetime"].(float64); ok && result.ResourceType != "Elastic IPs" && result.ResourceType != "Load Balancers" {
-				current, _ := data.CombinedCosts[result.ResourceType]["lifetime"].(float64)
-				data.CombinedCosts[result.ResourceType]["lifetime"] = current + lifetime
-				totalLifetime += lifetime
+				// Only process resources that have actual cost data
+				hasCost := false
+				if hourly := total.HourlyRate; hourly > 0 {
+					current, _ := data.CombinedCosts[result.ResourceType]["hourly_rate"].(float64)
+					data.CombinedCosts[result.ResourceType]["hourly_rate"] = current + hourly
+					hasCost = true
+				}
+				if daily := total.DailyRate; daily > 0 {
+					current, _ := data.CombinedCosts[result.ResourceType]["daily_rate"].(float64)
+					data.CombinedCosts[result.ResourceType]["daily_rate"] = current + daily
+					hasCost = true
+				}
+				if monthly := total.MonthlyRate; monthly > 0 {
+					current, _ := data.CombinedCosts[result.ResourceType]["monthly_rate"].(float64)
+					data.CombinedCosts[result.ResourceType]["monthly_rate"] = current + monthly
+					hasCost = true
+				}
+				if yearly := total.YearlyRate; yearly > 0 {
+					current, _ := data.CombinedCosts[result.ResourceType]["yearly_rate"].(float64)
+					data.CombinedCosts[result.ResourceType]["yearly_rate"] = current + yearly
+					hasCost = true
+				}
+				if lifetime := total.Lifetime; lifetime != nil && *lifetime > 0 {
+					current, _ := data.CombinedCosts[result.ResourceType]["lifetime"].(float64)
+					data.CombinedCosts[result.ResourceType]["lifetime"] = current + *lifetime
+					hasCost = true
+				}
+
+				// If the resource has no actual cost data, remove it from the combined costs
+				if !hasCost {
+					delete(data.CombinedCosts, result.ResourceType)
+				}
 			}
 		}
 
 		// Add to resources list
-		resourceName, _ := result.Details["name"].(string)
-		resourceID, _ := result.Details["id"].(string)
+		resourceName := result.ResourceName
+		if resourceName == "" {
+			if name, ok := result.Details["name"].(string); ok {
+				resourceName = name
+			}
+		}
+
+		resourceID := result.ResourceID
+		if resourceID == "" {
+			if id, ok := result.Details["id"].(string); ok {
+				resourceID = id
+			}
+		}
+
+		detailsJSON, err := json.Marshal(result.Details)
+		if err != nil {
+			logging.Debug("Error marshaling details to JSON", map[string]interface{}{
+				"error": err,
+				"details": result.Details,
+			})
+			detailsJSON = []byte("{}")
+		}
 
 		data.Resources = append(data.Resources, Resource{
 			AccountID:    accountID,
@@ -214,21 +267,8 @@ func processResults(results []aws.ScanResult) TemplateData {
 			Name:        resourceName,
 			ResourceID:  resourceID,
 			Reason:      result.Reason,
-			Details:     fmt.Sprintf("%+v", result.Details),
+			DetailsJSON: template.JS(detailsJSON),
 		})
-	}
-
-	// Set the totals in metrics
-	data.ScanMetrics = ScanMetrics{
-		TotalScans:        totalScans,
-		AvgScansPerSecond: avgScansPerSecond,
-		TotalRunTime:      totalRunTime,
-		CompletedAt:       time.Now(),
-		TotalHourly:       totalHourly,
-		TotalDaily:        totalDaily,
-		TotalMonthly:      totalMonthly,
-		TotalYearly:       totalYearly,
-		TotalLifetime:     totalLifetime,
 	}
 
 	return data
