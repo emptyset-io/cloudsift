@@ -63,15 +63,14 @@ func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int,
 
 // Scan implements Scanner interface
 func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": opts.Region,
-			"role":   opts.Role,
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no AWS session provided")
 	}
+
+	// Create a copy of the session with the correct region
+	sess := opts.Session.Copy(&aws.Config{
+		Region: aws.String(opts.Region),
+	})
 
 	// Get current account ID
 	accountID, err := utils.GetAccountID(sess)

@@ -166,24 +166,22 @@ func (s *OpenSearchScanner) determineUnusedReasons(metrics map[string]float64, v
 
 // Scan implements Scanner interface
 func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": opts.Region,
-			"role":   opts.Role,
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no AWS session provided")
 	}
 
-	// Get current account ID
+	// Create a copy of the session with the correct region
+	sess := opts.Session.Copy(&aws.Config{
+		Region: aws.String(opts.Region),
+	})
+
+	// Get current account ID and create service clients
 	accountID, err := utils.GetAccountID(sess)
 	if err != nil {
 		logging.Error("Failed to get caller identity", err, nil)
 		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	// Create service clients
 	esClient := opensearchservice.New(sess)
 	cwClient := cloudwatch.New(sess)
 

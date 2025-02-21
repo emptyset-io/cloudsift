@@ -118,15 +118,16 @@ func (s *S3Scanner) determineUnusedReasons(currentObjectCount int64, metrics map
 
 // Scan implements Scanner interface
 func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region": opts.Region,
-			"role":   opts.Role,
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no AWS session provided")
 	}
 
+	// Create a copy of the session with the correct region
+	sess := opts.Session.Copy(&aws.Config{
+		Region: aws.String(opts.Region),
+	})
+
+	// Get current account ID and create service clients
 	accountID, err := utils.GetAccountID(sess)
 	if err != nil {
 		logging.Error("Failed to get caller identity", err, nil)
