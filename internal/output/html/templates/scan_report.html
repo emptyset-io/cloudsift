@@ -209,6 +209,7 @@
                     </thead>
                     <tbody>
                         {{ range $resourceType, $costs := .CombinedCosts }}
+                        {{ if ne $resourceType "Total" }}
                         <tr>
                             <td>{{ $resourceType }}</td>
                             <td>${{ formatHourlyCost (index $costs "hourly_rate") }}</td>
@@ -224,6 +225,15 @@
                             </td>
                         </tr>
                         {{ end }}
+                        {{ end }}
+                        <tr>
+                            <td>Totals</td>
+                            <td>${{ formatHourlyCost .ScanMetrics.TotalHourly }}</td>
+                            <td>${{ formatDailyCost .ScanMetrics.TotalDaily }}</td>
+                            <td>${{ formatMonthlyCost .ScanMetrics.TotalMonthly }}</td>
+                            <td>${{ formatYearlyCost .ScanMetrics.TotalYearly }}</td>
+                            <td>${{ formatLifetimeCost .ScanMetrics.TotalLifetime }}</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>

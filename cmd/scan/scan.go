@@ -142,6 +142,8 @@ func getScanners(scannerList string) ([]aws.Scanner, error) {
 }
 
 func runScan(cmd *cobra.Command, opts *scanOptions) error {
+	startTime := time.Now()
+
 	// Get and validate scanners
 	scanners, err := getScanners(opts.scanners)
 	if err != nil {
@@ -282,18 +284,29 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				}
 			}
 
-			// Calculate scan metrics
-			startTime := time.Now()
+			// Collect all results
+			var results []aws.ScanResult
+			for _, result := range allResults {
+				if result.Reason != "" {
+					results = append(results, result)
+				}
+			}
+
+			// Calculate metrics
+			endTime := time.Now()
+			totalRunTime := endTime.Sub(startTime).Seconds()
 			totalScans := len(scanners) * len(regions) * len(accounts)
-			duration := time.Since(startTime).Seconds()
+			avgScansPerSecond := float64(totalScans) / totalRunTime
+
 			metrics := html.ScanMetrics{
 				TotalScans:        totalScans,
-				TotalRunTime:      duration,
-				AvgScansPerSecond: float64(totalScans) / duration,
+				AvgScansPerSecond: avgScansPerSecond,
+				TotalRunTime:      totalRunTime,
+				CompletedAt:       endTime,
 			}
 
 			outputPath := "reports/scan_report.html"
-			if err := html.WriteHTML(allResults, outputPath, metrics); err != nil {
+			if err := html.WriteHTML(results, outputPath, metrics); err != nil {
 				return fmt.Errorf("error writing HTML output: %v", err)
 			}
 			fmt.Printf("HTML report written to %s\n", outputPath)

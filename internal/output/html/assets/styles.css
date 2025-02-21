@@ -222,6 +222,17 @@ tr:hover {
     background-color: var(--accent-light);
 }
 
+.total-row {
+    font-weight: bold;
+    background-color: var(--accent-light);
+    border-top: 2px solid var(--accent);
+}
+
+.total-row td {
+    padding: 1rem 0.75rem !important;
+    color: var(--accent);
+}
+
 /* Table wrapper for horizontal scrolling on mobile */
 .table-wrapper {
     width: 100%;
