@@ -1,15 +1,18 @@
 package aws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"cloudsift/internal/aws/ratelimit"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -158,6 +161,7 @@ type CostEstimator struct {
 	priceCache    map[string]float64
 	cacheLock     sync.RWMutex
 	saveLock      sync.Mutex
+	rateLimiter   *ratelimit.ServiceLimiter
 }
 
 // DefaultCostEstimator is the default cost estimator instance
@@ -196,6 +200,16 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 		cacheFile:     cacheFile,
 		priceCache:    make(map[string]float64),
 	}
+
+	// Configure rate limits for pricing API
+	pricingConfig := ratelimit.ServiceConfig{
+		DefaultRequestsPerSecond: 5, // Conservative default
+		APILimits: map[string]int{
+			"GetProducts": 5, // 5 requests per second for GetProducts
+		},
+	}
+
+	ce.rateLimiter = ratelimit.GetServiceLimiter("pricing", pricingConfig)
 
 	if err := ce.loadCache(); err != nil {
 		logging.Error("Failed to load cache", err, map[string]interface{}{
@@ -312,6 +326,12 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		})
 		region = "us-east-1"
 		location = regionToLocation["us-east-1"]
+	}
+
+	// If volume type is not specified, default to gp3
+	if config.VolumeType == "" {
+		logging.Debug("No volume type specified, defaulting to gp3", nil)
+		config.VolumeType = "gp3"
 	}
 
 	var filters []*pricing.Filter
@@ -830,81 +850,161 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 
 func (ce *CostEstimator) getPriceFromAPI(filters []*pricing.Filter) (float64, error) {
 	input := &pricing.GetProductsInput{
-		ServiceCode: aws.String("AWSElasticLoadBalancer"),
 		Filters:     filters,
+		MaxResults:  aws.Int64(1),
+		ServiceCode: aws.String("AmazonEC2"),
 	}
 
-	result, err := ce.pricingClient.GetProducts(input)
+	var price float64
+	var found bool
+
+	// Execute GetProducts with rate limiting
+	err := ce.rateLimiter.Execute(context.Background(), "GetProducts", func() error {
+		return ce.pricingClient.GetProductsPages(input,
+			func(page *pricing.GetProductsOutput, lastPage bool) bool {
+				for _, priceMap := range page.PriceList {
+					terms, ok := priceMap["terms"].(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					onDemand, ok := terms["OnDemand"].(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					for _, dimension := range onDemand {
+						dimMap, ok := dimension.(map[string]interface{})
+						if !ok {
+							continue
+						}
+
+						priceDimensions, ok := dimMap["priceDimensions"].(map[string]interface{})
+						if !ok {
+							continue
+						}
+
+						for _, dimension := range priceDimensions {
+							dimMap, ok := dimension.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							pricePerUnit, ok := dimMap["pricePerUnit"].(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							usd, ok := pricePerUnit["USD"].(string)
+							if !ok {
+								continue
+							}
+
+							var parseErr error
+							price, parseErr = strconv.ParseFloat(usd, 64)
+							if parseErr != nil {
+								continue
+							}
+
+							found = true
+							return false // Stop pagination
+						}
+					}
+				}
+				return !lastPage
+			})
+	})
+
 	if err != nil {
-		return 0, fmt.Errorf("failed to get pricing: %w", err)
+		logging.Error("Failed to get pricing data", err, map[string]interface{}{
+			"filters": filters,
+		})
+		return 0, fmt.Errorf("failed to get pricing data: %w", err)
 	}
 
-	if len(result.PriceList) == 0 {
+	if !found {
+		// Try with us-east-1 and gp3 if pricing not found
+		for i, filter := range filters {
+			if aws.StringValue(filter.Field) == "location" {
+				filters[i].Value = aws.String("US East (N. Virginia)")
+				logging.Debug("Defaulting to us-east-1 pricing", nil)
+			}
+			if aws.StringValue(filter.Field) == "volumeApiName" {
+				filters[i].Value = aws.String("gp3")
+				logging.Debug("Defaulting to gp3 volume type", nil)
+			}
+		}
+
+		// Try again with default values
+		err := ce.rateLimiter.Execute(context.Background(), "GetProducts", func() error {
+			return ce.pricingClient.GetProductsPages(input,
+				func(page *pricing.GetProductsOutput, lastPage bool) bool {
+					for _, priceMap := range page.PriceList {
+						terms, ok := priceMap["terms"].(map[string]interface{})
+						if !ok {
+							continue
+						}
+
+						onDemand, ok := terms["OnDemand"].(map[string]interface{})
+						if !ok {
+							continue
+						}
+
+						for _, dimension := range onDemand {
+							dimMap, ok := dimension.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							priceDimensions, ok := dimMap["priceDimensions"].(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							for _, dimension := range priceDimensions {
+								dimMap, ok := dimension.(map[string]interface{})
+								if !ok {
+									continue
+								}
+
+								pricePerUnit, ok := dimMap["pricePerUnit"].(map[string]interface{})
+								if !ok {
+									continue
+								}
+
+								usd, ok := pricePerUnit["USD"].(string)
+								if !ok {
+									continue
+								}
+
+								var parseErr error
+								price, parseErr = strconv.ParseFloat(usd, 64)
+								if parseErr != nil {
+									continue
+								}
+
+								found = true
+								return false // Stop pagination
+							}
+						}
+					}
+					return !lastPage
+				})
+		})
+
+		if err != nil {
+			logging.Error("Failed to get default pricing data", err, map[string]interface{}{
+				"filters": filters,
+			})
+			return 0, fmt.Errorf("failed to get default pricing data: %w", err)
+		}
+	}
+
+	if !found {
 		return 0, fmt.Errorf("no pricing information found")
 	}
 
-	// Parse the price from the response
-	var priceFloat float64
-	for _, priceData := range result.PriceList {
-		// Convert to JSON for easier parsing
-		jsonBytes, err := json.Marshal(priceData)
-		if err != nil {
-			continue
-		}
-
-		var data map[string]interface{}
-		if err := json.Unmarshal(jsonBytes, &data); err != nil {
-			continue
-		}
-
-		terms, ok := data["terms"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		onDemand, ok := terms["OnDemand"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Get the first price dimension
-		for _, term := range onDemand {
-			termData, ok := term.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			priceDimensions, ok := termData["priceDimensions"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			for _, dimension := range priceDimensions {
-				dimData, ok := dimension.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				pricePerUnit, ok := dimData["pricePerUnit"].(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				priceStr, ok := pricePerUnit["USD"].(string)
-				if !ok {
-					continue
-				}
-
-				if _, err := fmt.Sscanf(priceStr, "%f", &priceFloat); err != nil {
-					continue
-				}
-
-				return priceFloat, nil
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("could not find valid price in response")
+	return price, nil
 }
 
 // roundCost rounds a cost value to 4 decimal places
