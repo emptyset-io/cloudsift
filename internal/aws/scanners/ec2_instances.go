@@ -188,16 +188,14 @@ func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Ins
 
 // Scan implements Scanner interface
 func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create session by assuming scanner role in target account
-	sess, err := awslib.GetScannerSession(opts)
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region":     opts.Region,
-			"role":       opts.Role,
-			"account_id": opts.AccountID,
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no AWS session provided")
 	}
+
+	// Create a copy of the session with the correct region
+	sess := opts.Session.Copy(&aws.Config{
+		Region: aws.String(opts.Region),
+	})
 
 	// Get current account ID and create service clients
 	accountID, err := utils.GetAccountID(sess)

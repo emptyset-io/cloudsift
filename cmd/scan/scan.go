@@ -180,15 +180,25 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var tasks []worker.Task
 	var resultsMutex sync.Mutex
 
-	for _, scanner := range scanners {
-		// For IAM scanners, only scan in us-east-1 since IAM is a global service
-		scanRegions := regions
-		if scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users" {
-			scanRegions = []string{"us-east-1"}
+	for _, account := range accountsResult.Accounts {
+		// Create scanner session for this account
+		scannerSess, err := aws.AssumeRole(account.ID, opts.scannerRole, accountsResult.Session)
+		if err != nil {
+			logging.Error("Failed to assume scanner role", err, map[string]interface{}{
+				"account_id": account.ID,
+				"role":      opts.scannerRole,
+			})
+			continue
 		}
 
-		for _, region := range scanRegions {
-			for _, account := range accountsResult.Accounts {
+		for _, scanner := range scanners {
+			// For IAM scanners, only scan in us-east-1 since IAM is a global service
+			scanRegions := regions
+			if scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users" {
+				scanRegions = []string{"us-east-1"}
+			}
+
+			for _, region := range scanRegions {
 				scanner := scanner // Create new variable for closure
 				region := region
 				account := account
@@ -199,9 +209,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
-						Role:       opts.scannerRole,
 						AccountID:  account.ID,
-						Session:    accountsResult.Session,
+						Session:    scannerSess,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
