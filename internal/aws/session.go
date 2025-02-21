@@ -2,6 +2,7 @@ package aws
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
@@ -55,26 +56,32 @@ func GetScannerSession(opts ScanOptions) (*session.Session, error) {
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
+	// Get current identity to check if we're already running as a role
+	svc := sts.New(sess)
+	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+
+	// If we're already running as the scanner role, just return the session
+	if strings.Contains(*identity.Arn, opts.Role) {
+		return sess, nil
+	}
+
+	currentAccountID := *identity.Account
+
 	// If no scanner role specified, return base session
 	if opts.Role == "" {
 		return sess, nil
 	}
 
 	// If target account specified but no organization role, we can't do cross-account access
-	if opts.TargetAccountID != "" && opts.OrganizationRole == "" {
+	if opts.TargetAccountID != "" && opts.TargetAccountID != currentAccountID && opts.OrganizationRole == "" {
 		return nil, fmt.Errorf("organization role is required for cross-account access")
 	}
 
-	// Get current account ID
-	svc := sts.New(sess)
-	identity, err := svc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-	currentAccountID := *identity.Account
-
-	// If scanning current account, assume scanner role directly
-	if opts.TargetAccountID == "" || opts.TargetAccountID == currentAccountID {
+	// If scanning current account or we're already running as the org role, assume scanner role directly
+	if opts.TargetAccountID == "" || opts.TargetAccountID == currentAccountID || strings.Contains(*identity.Arn, opts.OrganizationRole) {
 		roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", currentAccountID, opts.Role)
 		creds := stscreds.NewCredentials(sess, roleARN)
 		return session.NewSession(cfg.WithCredentials(creds))
