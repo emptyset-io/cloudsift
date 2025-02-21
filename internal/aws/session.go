@@ -55,3 +55,22 @@ func AssumeRole(targetAccountID, roleName string, sess *session.Session) (*sessi
 	creds := stscreds.NewCredentials(sess, roleARN)
 	return session.NewSession(aws.NewConfig().WithCredentials(creds))
 }
+
+// AssumeRoleFromOrganization creates a new session by first assuming the organization role,
+// then using that session to assume the scanner role in the target account
+func AssumeRoleFromOrganization(targetAccountID, organizationRole, scannerRole string, sess *session.Session) (*session.Session, error) {
+	if organizationRole == "" || scannerRole == "" {
+		return sess, nil
+	}
+
+	// First assume the organization role
+	orgSess, err := GetSession(organizationRole)
+	if err != nil {
+		return nil, fmt.Errorf("failed to assume organization role: %w", err)
+	}
+
+	// Then use the organization role session to assume the scanner role in the target account
+	roleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, scannerRole)
+	creds := stscreds.NewCredentials(orgSess, roleARN)
+	return session.NewSession(aws.NewConfig().WithCredentials(creds))
+}

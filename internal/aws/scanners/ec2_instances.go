@@ -11,6 +11,7 @@ import (
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
@@ -188,12 +189,20 @@ func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Ins
 
 // Scan implements Scanner interface
 func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Create session with chained role assumption if both roles are provided
+	var sess *session.Session
+	var err error
+	if opts.OrganizationRole != "" && opts.Role != "" {
+		sess, err = awslib.AssumeRoleFromOrganization(opts.AccountID, opts.OrganizationRole, opts.Role, nil)
+	} else {
+		sess, err = awslib.GetSession(opts.Role, opts.Region)
+	}
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"region": opts.Region,
 			"role":   opts.Role,
+			"org_role": opts.OrganizationRole,
+			"account_id": opts.AccountID,
 		})
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
