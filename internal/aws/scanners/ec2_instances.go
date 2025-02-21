@@ -11,10 +11,8 @@ import (
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/sts"
 )
 
 // EC2InstanceScanner scans for EC2 instances
@@ -190,45 +188,12 @@ func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Ins
 
 // Scan implements Scanner interface
 func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create session with chained role assumption if both roles are provided
-	var sess *session.Session
-	var err error
-
-	// First get a base session to check our current identity
-	baseSess, err := session.NewSession(aws.NewConfig().WithRegion(opts.Region))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create base session: %w", err)
+	if opts.Session == nil {
+		return nil, fmt.Errorf("no AWS session provided")
 	}
 
-	// Check if we're already in the scanner role
-	stsSvc := sts.New(baseSess)
-	identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
-	currentRole := aws.StringValue(identity.Arn)
-	if strings.Contains(currentRole, opts.Role) {
-		// We're already in the scanner role, just use the current session
-		sess = baseSess
-	} else if opts.OrganizationRole != "" && opts.Role != "" {
-		// Need to assume roles
-		sess, err = awslib.AssumeRoleFromOrganization(opts.AccountID, opts.OrganizationRole, opts.Role, nil, opts.Region)
-	} else {
-		// Just assume the scanner role
-		sess, err = awslib.GetSession(opts.Role, opts.Region)
-	}
-
-	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
-			"region":     opts.Region,
-			"role":       opts.Role,
-			"org_role":   opts.OrganizationRole,
-			"account_id": opts.AccountID,
-			"current_role": currentRole,
-		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
-	}
+	// Use the provided session with the scanner role already assumed
+	sess := opts.Session
 
 	// Get current account ID and create service clients
 	accountID, err := utils.GetAccountID(sess)

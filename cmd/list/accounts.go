@@ -31,18 +31,18 @@ If an organization role is provided, shows all accounts in the organization.`,
 
 func runAccounts(cmd *cobra.Command) error {
 	organizationRole, _ := cmd.Flags().GetString("organization-role")
-	accounts, err := aws.ListAccounts(organizationRole)
+	result, err := aws.ListAccounts(organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
-	if len(accounts) == 0 {
+	if len(result.Accounts) == 0 {
 		fmt.Println("No accounts found")
 		return nil
 	}
 
 	fmt.Println("Available accounts:")
-	for _, account := range accounts {
+	for _, account := range result.Accounts {
 		fmt.Printf("  %s - %s\n", account.ID, account.Name)
 	}
 

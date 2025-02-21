@@ -155,25 +155,25 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	// Get list of accounts to scan
-	accounts, err := aws.ListAccounts(opts.organizationRole)
+	accountsResult, err := aws.ListAccounts(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
+	}
+
+	// Initialize results map
+	accountResults := make(map[string]*scanResult)
+	for _, account := range accountsResult.Accounts {
+		accountResults[account.ID] = &scanResult{
+			AccountID:   account.ID,
+			AccountName: account.Name,
+			Results:     make(map[string]aws.ScanResults),
+		}
 	}
 
 	// Get list of regions to scan
 	regions, err := getRegionsToScan(opts)
 	if err != nil {
 		return fmt.Errorf("failed to get regions: %w", err)
-	}
-
-	// Initialize results map
-	accountResults := make(map[string]*scanResult)
-	for _, account := range accounts {
-		accountResults[account.ID] = &scanResult{
-			AccountID:   account.ID,
-			AccountName: account.Name,
-			Results:     make(map[string]aws.ScanResults),
-		}
 	}
 
 	// Create tasks for each scanner+region combination
@@ -188,7 +188,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 
 		for _, region := range scanRegions {
-			for _, account := range accounts {
+			for _, account := range accountsResult.Accounts {
 				scanner := scanner // Create new variable for closure
 				region := region
 				account := account
@@ -196,12 +196,22 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				tasks = append(tasks, worker.Task(func(ctx context.Context) error {
 					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
 
+					// Create scanner session for this account and region
+					scannerSess := accountsResult.Session
+					if scannerSess == nil {
+						logging.Error("No organization session available", nil, nil)
+						return fmt.Errorf("no organization session available")
+					}
+
+					// Update the region for this scan
+					scannerSess = scannerSess.Copy()
+					scannerSess.Config.Region = &region
+
 					results, err := scanner.Scan(aws.ScanOptions{
-						Region:           region,
-						DaysUnused:       opts.daysUnused,
-						Role:             opts.scannerRole,
-						OrganizationRole: opts.organizationRole,
-						AccountID:        account.ID,
+						Region:     region,
+						DaysUnused: opts.daysUnused,
+						AccountID:  account.ID,
+						Session:    scannerSess,
 					})
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
@@ -297,7 +307,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			// Calculate metrics
 			endTime := time.Now()
 			totalRunTime := endTime.Sub(startTime).Seconds()
-			totalScans := len(scanners) * len(regions) * len(accounts)
+			totalScans := len(scanners) * len(regions) * len(accountsResult.Accounts)
 			avgScansPerSecond := float64(totalScans) / totalRunTime
 
 			metrics := html.ScanMetrics{

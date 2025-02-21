@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/sts"
 )
@@ -14,9 +15,15 @@ type Account struct {
 	Name string
 }
 
+// ListAccountsResult contains the list of accounts and the organization session
+type ListAccountsResult struct {
+	Accounts []Account
+	Session  *session.Session
+}
+
 // ListAccounts attempts to list all accounts in the organization, falling back to current account if not in an org
 // If organizationRole is provided, assumes that role before listing accounts
-func ListAccounts(organizationRole string) ([]Account, error) {
+func ListAccounts(organizationRole string) (*ListAccountsResult, error) {
 	// First get current account ID
 	sess, err := GetSession("", "")
 	if err != nil {
@@ -45,7 +52,10 @@ func ListAccounts(organizationRole string) ([]Account, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to list organization accounts: %w", err)
 		}
-		return accounts, nil
+		return &ListAccountsResult{
+			Accounts: accounts,
+			Session:  orgSess,
+		}, nil
 	}
 
 	// If no organization role, just get the current account name from Organizations API
@@ -53,7 +63,10 @@ func ListAccounts(organizationRole string) ([]Account, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account from organization: %w", err)
 	}
-	return []Account{account}, nil
+	return &ListAccountsResult{
+		Accounts: []Account{account},
+		Session:  sess,
+	}, nil
 }
 
 // listOrganizationAccounts lists all accounts in the organization

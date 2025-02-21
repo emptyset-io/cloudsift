@@ -3,6 +3,8 @@ package aws
 import (
 	"fmt"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 // ScanOptions contains configuration for the scan operation
@@ -12,6 +14,7 @@ type ScanOptions struct {
 	Role            string // Role to assume for scanning
 	OrganizationRole string // Role to assume for organization access
 	AccountID        string // AWS account ID being scanned
+	Session          *session.Session // Pre-configured AWS session
 }
 
 // Scanner represents a resource scanner that can scan AWS resources
