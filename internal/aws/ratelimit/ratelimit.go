@@ -21,6 +21,13 @@ const (
 	defaultRequestsPerSecond = 5 // Conservative default of 5 requests per second
 )
 
+var (
+	// Global instance of the service limiter registry
+	globalRegistry = &ServiceLimiterRegistry{
+		limiters: make(map[string]*ServiceLimiter),
+	}
+)
+
 // ServiceConfig holds configuration for a service's rate limits
 type ServiceConfig struct {
 	// Default requests per second for APIs not explicitly configured
@@ -45,6 +52,26 @@ func DefaultServiceConfig() ServiceConfig {
 	}
 }
 
+// ServiceLimiterRegistry manages a global registry of service limiters
+type ServiceLimiterRegistry struct {
+	mu       sync.RWMutex
+	limiters map[string]*ServiceLimiter
+}
+
+// GetServiceLimiter returns a service limiter for the given service name, creating it if it doesn't exist
+func GetServiceLimiter(serviceName string, configs ...ServiceConfig) *ServiceLimiter {
+	globalRegistry.mu.Lock()
+	defer globalRegistry.mu.Unlock()
+
+	if limiter, exists := globalRegistry.limiters[serviceName]; exists {
+		return limiter
+	}
+
+	limiter := newServiceLimiter(configs...)
+	globalRegistry.limiters[serviceName] = limiter
+	return limiter
+}
+
 // ServiceLimiter manages rate limiting for a specific AWS service
 type ServiceLimiter struct {
 	mu            sync.Mutex
@@ -52,8 +79,8 @@ type ServiceLimiter struct {
 	config        ServiceConfig
 }
 
-// NewServiceLimiter creates a new ServiceLimiter with optional configuration
-func NewServiceLimiter(configs ...ServiceConfig) *ServiceLimiter {
+// newServiceLimiter creates a new ServiceLimiter with optional configuration
+func newServiceLimiter(configs ...ServiceConfig) *ServiceLimiter {
 	config := DefaultServiceConfig()
 	if len(configs) > 0 {
 		config = configs[0]
