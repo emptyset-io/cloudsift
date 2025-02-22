@@ -46,11 +46,12 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 }
 
 // GetSessionChain creates a new AWS session with proper role assumption chain:
-// Base Profile -> Organization Role (optional) -> Scanner Role (optional)
-func GetSessionChain(organizationRole, scannerRole string, region string) (*session.Session, error) {
+// Base Profile -> Organization Role (optional) -> Scanner Role (optional, in target account)
+func GetSessionChain(organizationRole, scannerRole string, targetAccountID string, region string) (*session.Session, error) {
 	logging.Debug("Creating AWS session chain", map[string]interface{}{
 		"organization_role": organizationRole,
 		"scanner_role":     scannerRole,
+		"target_account":   targetAccountID,
 		"region":           region,
 	})
 
@@ -106,35 +107,59 @@ func GetSessionChain(organizationRole, scannerRole string, region string) (*sess
 
 	// Assume scanner role if provided
 	if scannerRole != "" {
-		logging.Debug("Attempting to assume scanner role", map[string]interface{}{
-			"role": scannerRole,
-		})
+		// If target account specified, assume scanner role directly in that account
+		if targetAccountID != "" {
+			logging.Debug("Attempting to assume scanner role in target account", map[string]interface{}{
+				"role":           scannerRole,
+				"target_account": targetAccountID,
+			})
 
-		// Get current identity for scanner role assumption
-		stsSvc := sts.New(currentSession)
-		identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get identity for scanner role assumption: %w", err)
+			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, scannerRole)
+			scannerCreds := stscreds.NewCredentials(currentSession, scannerRoleARN)
+			scannerSession, err := session.NewSession(cfg.WithCredentials(scannerCreds))
+			if err != nil {
+				return nil, fmt.Errorf("failed to assume scanner role %s in account %s: %w", scannerRole, targetAccountID, err)
+			}
+
+			// Verify scanner role assumption
+			scannerStsSvc := sts.New(scannerSession)
+			scannerIdentity, err := scannerStsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to verify scanner role assumption: %w", err)
+			}
+			logging.Info("Assumed scanner role in target account", map[string]interface{}{
+				"role_arn":       *scannerIdentity.Arn,
+				"target_account": targetAccountID,
+			})
+
+			currentSession = scannerSession
+		} else {
+			// No target account, assume scanner role in current account
+			stsSvc := sts.New(currentSession)
+			identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get identity for scanner role assumption: %w", err)
+			}
+
+			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, scannerRole)
+			scannerCreds := stscreds.NewCredentials(currentSession, scannerRoleARN)
+			scannerSession, err := session.NewSession(cfg.WithCredentials(scannerCreds))
+			if err != nil {
+				return nil, fmt.Errorf("failed to assume scanner role %s: %w", scannerRole, err)
+			}
+
+			// Verify scanner role assumption
+			scannerStsSvc := sts.New(scannerSession)
+			scannerIdentity, err := scannerStsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to verify scanner role assumption: %w", err)
+			}
+			logging.Info("Assumed scanner role in current account", map[string]interface{}{
+				"role_arn": *scannerIdentity.Arn,
+			})
+
+			currentSession = scannerSession
 		}
-
-		scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, scannerRole)
-		scannerCreds := stscreds.NewCredentials(currentSession, scannerRoleARN)
-		scannerSession, err := session.NewSession(cfg.WithCredentials(scannerCreds))
-		if err != nil {
-			return nil, fmt.Errorf("failed to assume scanner role %s: %w", scannerRole, err)
-		}
-
-		// Verify scanner role assumption
-		scannerStsSvc := sts.New(scannerSession)
-		scannerIdentity, err := scannerStsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to verify scanner role assumption: %w", err)
-		}
-		logging.Info("Assumed scanner role", map[string]interface{}{
-			"role_arn": *scannerIdentity.Arn,
-		})
-
-		currentSession = scannerSession
 	}
 
 	return currentSession, nil

@@ -8,10 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/spf13/cobra"
 
-	"cloudsift/internal/aws"
+	awsinternal "cloudsift/internal/aws"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/output"
@@ -104,28 +107,28 @@ Examples:
 }
 
 type scanResult struct {
-	AccountID   string                     `json:"account_id"`
-	AccountName string                     `json:"account_name"`
-	Results     map[string]aws.ScanResults `json:"results"` // Map of scanner name to results
+	AccountID   string                             `json:"account_id"`
+	AccountName string                             `json:"account_name"`
+	Results     map[string]awsinternal.ScanResults `json:"results"` // Map of scanner name to results
 }
 
 // isIAMScanner returns true if the scanner is for IAM resources
-func isIAMScanner(scanner aws.Scanner) bool {
+func isIAMScanner(scanner awsinternal.Scanner) bool {
 	return scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users"
 }
 
-func getScanners(scannerList string) ([]aws.Scanner, error) {
-	var scanners []aws.Scanner
+func getScanners(scannerList string) ([]awsinternal.Scanner, error) {
+	var scanners []awsinternal.Scanner
 
 	// If no scanners specified, get all available scanners
 	if scannerList == "" {
-		names := aws.DefaultRegistry.ListScanners()
+		names := awsinternal.DefaultRegistry.ListScanners()
 		if len(names) == 0 {
 			return nil, fmt.Errorf("no scanners available in registry")
 		}
 
 		for _, name := range names {
-			scanner, err := aws.DefaultRegistry.GetScanner(name)
+			scanner, err := awsinternal.DefaultRegistry.GetScanner(name)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
 			}
@@ -137,7 +140,7 @@ func getScanners(scannerList string) ([]aws.Scanner, error) {
 	// Parse comma-separated list of scanners
 	names := strings.Split(scannerList, ",")
 	for _, name := range names {
-		scanner, err := aws.DefaultRegistry.GetScanner(name)
+		scanner, err := awsinternal.DefaultRegistry.GetScanner(name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
 		}
@@ -151,44 +154,139 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Get and validate scanners
 	scanners, err := getScanners(opts.scanners)
 	if err != nil {
-		return err
+		logging.Error("Failed to get scanners", err, map[string]interface{}{
+			"scanners": opts.scanners,
+		})
+		scanners = []awsinternal.Scanner{} // Continue with empty scanner list
 	}
 
 	if len(scanners) == 0 {
-		return fmt.Errorf("no scanners available")
+		logging.Warn("No scanners available, scan will be skipped", nil)
 	}
 
-	// Get list of accounts to scan using organization role if provided
-	accounts, err := aws.ListAccounts(opts.organizationRole)
-	if err != nil {
-		return fmt.Errorf("failed to list accounts: %w", err)
-	}
+	// Create base session and get accounts
+	var baseSession *session.Session
+	var accounts []awsinternal.Account
 
-	// Create base sessions for each account
-	accountSessions := make(map[string]*session.Session)
-	for _, account := range accounts {
-		// Create session chain for scanning
-		// If we have both roles, this will chain: profile -> org role -> scanner role
-		scanSession, err := aws.GetSessionChain(opts.organizationRole, opts.scannerRole, "")
+	if opts.organizationRole != "" && opts.scannerRole != "" {
+		logging.Info("Creating organization session", map[string]interface{}{
+			"organization_role": opts.organizationRole,
+			"scanner_role":     opts.scannerRole,
+		})
+		// Create org role session for listing accounts
+		baseSession, err = awsinternal.GetSessionChain(opts.organizationRole, "", "", "us-west-2")
 		if err != nil {
-			return fmt.Errorf("failed to create session chain for account %s: %w", account.ID, err)
+			logging.Error("Failed to create organization session", err, map[string]interface{}{
+				"organization_role": opts.organizationRole,
+			})
+			// Fall back to current session
+			logging.Info("Falling back to current session")
+			baseSession, err = session.NewSession()
+			if err != nil {
+				logging.Error("Failed to create base session", err, nil)
+				return nil // Return nil to continue without failing
+			}
 		}
-		accountSessions[account.ID] = scanSession
+		accounts, err = awsinternal.ListAccountsWithSession(baseSession)
+		if err != nil {
+			logging.Error("Failed to list organization accounts", err, map[string]interface{}{
+				"organization_role": opts.organizationRole,
+			})
+			// Fall back to current account
+			logging.Info("Falling back to current account")
+			accounts, err = awsinternal.ListCurrentAccount(baseSession)
+			if err != nil {
+				logging.Error("Failed to get current account", err, nil)
+				return nil // Return nil to continue without failing
+			}
+		}
+	} else {
+		logging.Debug("Using current session", nil)
+		// Use current session
+		baseSession, err = session.NewSession()
+		if err != nil {
+			logging.Error("Failed to create base session", err, nil)
+			return nil // Return nil to continue without failing
+		}
+		// Get current account only
+		accounts, err = awsinternal.ListCurrentAccount(baseSession)
+		if err != nil {
+			logging.Error("Failed to get current account", err, nil)
+			return nil // Return nil to continue without failing
+		}
 	}
+
+	// Create sessions for each account
+	accountSessions := make(map[string]*session.Session)
+	var authenticatedAccounts []awsinternal.Account // Track accounts that successfully authenticated
+	for _, account := range accounts {
+		if opts.organizationRole != "" && opts.scannerRole != "" {
+			// Assume scanner role in target account using org session
+			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", account.ID, opts.scannerRole)
+			scannerCreds := stscreds.NewCredentials(baseSession, scannerRoleARN)
+			scanSession, err := session.NewSession(aws.NewConfig().WithCredentials(scannerCreds))
+			if err != nil {
+				logging.Warn("Failed to assume scanner role", map[string]interface{}{
+					"error":        err.Error(),
+					"account_id":   account.ID,
+					"account_name": account.Name,
+					"role_arn":     scannerRoleARN,
+				})
+				continue // Skip this account
+			}
+
+			// Verify scanner role assumption
+			stsSvc := sts.New(scanSession)
+			identity, err := stsSvc.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+			if err != nil {
+				logging.Warn("Failed to verify scanner role assumption", map[string]interface{}{
+					"error":        err.Error(),
+					"account_id":   account.ID,
+					"account_name": account.Name,
+					"role_arn":     scannerRoleARN,
+				})
+				continue // Skip this account
+			}
+			logging.Info("Successfully assumed scanner role", map[string]interface{}{
+				"account_id":   account.ID,
+				"account_name": account.Name,
+				"role_arn":     *identity.Arn,
+			})
+
+			accountSessions[account.ID] = scanSession
+			authenticatedAccounts = append(authenticatedAccounts, account)
+		} else {
+			// Use base session for current account
+			accountSessions[account.ID] = baseSession
+			authenticatedAccounts = append(authenticatedAccounts, account)
+		}
+	}
+
+	if len(accountSessions) == 0 {
+		logging.Warn("No valid sessions created for any accounts, scan will be skipped", nil)
+		return nil
+	}
+
+	// Use only authenticated accounts from here on
+	accounts = authenticatedAccounts
 
 	// Get and validate regions
 	var regions []string
 	if opts.regions == "" {
 		// If no regions specified, get all available regions
-		regions, err = aws.GetAvailableRegions(accountSessions[accounts[0].ID])
+		regions, err = awsinternal.GetAvailableRegions(accountSessions[accounts[0].ID])
 		if err != nil {
-			return fmt.Errorf("failed to get available regions: %w", err)
+			logging.Error("Failed to get available regions", err, nil)
+			return nil // Return nil to continue without failing
 		}
 	} else {
 		// Parse and validate comma-separated list of regions
 		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(accountSessions[accounts[0].ID], regions); err != nil {
-			return fmt.Errorf("invalid regions: %w", err)
+		if err := awsinternal.ValidateRegions(accountSessions[accounts[0].ID], regions); err != nil {
+			logging.Error("Invalid regions", err, map[string]interface{}{
+				"regions": opts.regions,
+			})
+			return nil // Return nil to continue without failing
 		}
 	}
 
@@ -216,7 +314,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		accountResults[account.ID] = &scanResult{
 			AccountID:   account.ID,
 			AccountName: account.Name,
-			Results:     make(map[string]aws.ScanResults),
+			Results:     make(map[string]awsinternal.ScanResults),
 		}
 	}
 
@@ -247,13 +345,13 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 					// Get the account's base session and create regional session
 					scanSession := accountSessions[account.ID]
-					regionSession, err := aws.GetSessionInRegion(scanSession, region)
+					regionSession, err := awsinternal.GetSessionInRegion(scanSession, region)
 					if err != nil {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, logRegion, err)
 						return fmt.Errorf("failed to create regional session for account %s: %w", account.ID, err)
 					}
 
-					results, err := scanner.Scan(aws.ScanOptions{
+					results, err := scanner.Scan(awsinternal.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
 						Session:    regionSession,
@@ -326,17 +424,19 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 			for accountID, result := range accountResults {
 				if err := writer.Write(accountID, result); err != nil {
-					return fmt.Errorf("error writing results for account %s: %v", accountID, err)
+					logging.Error("Error writing results for account", err, map[string]interface{}{
+						"account_id": accountID,
+					})
 				}
 			}
 		case "html":
 			// Create reports directory if it doesn't exist
 			if err := os.MkdirAll("reports", 0755); err != nil {
-				return fmt.Errorf("error creating reports directory: %v", err)
+				logging.Error("Error creating reports directory", err, nil)
 			}
 
 			// Collect all results
-			var allResults []aws.ScanResult
+			var allResults []awsinternal.ScanResult
 			for _, accountResult := range accountResults {
 				for _, scannerResults := range accountResult.Results {
 					allResults = append(allResults, scannerResults...)
@@ -353,13 +453,15 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 			outputPath := "reports/scan_report.html"
 			if err := html.WriteHTML(allResults, outputPath, metrics); err != nil {
-				return fmt.Errorf("error writing HTML output: %v", err)
+				logging.Error("Error writing HTML output", err, map[string]interface{}{
+					"output_path": outputPath,
+				})
 			}
 			fmt.Printf("HTML report written to %s\n", outputPath)
 		}
 	case "s3":
 		// TODO: Implement S3 output
-		return fmt.Errorf("S3 output not yet implemented")
+		logging.Warn("S3 output not yet implemented", nil)
 	}
 
 	logging.ScanComplete(len(accountResults))
