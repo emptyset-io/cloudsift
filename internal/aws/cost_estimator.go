@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -206,7 +207,7 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 		pricingClient: pricing.New(sess, cfg),
 		cacheFile:     cacheFile,
 		priceCache:    make(map[string]float64),
-		rateLimiter:   NewRateLimiter(nil), // Use default rate limit config
+		rateLimiter:   NewRateLimiter(&config.DefaultRateLimitConfig), // Use default rate limit config
 	}
 
 	if err := ce.loadCache(); err != nil {
@@ -714,7 +715,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		if err != nil {
 			logging.Error("Failed to get RDS instance price", err, map[string]interface{}{
 				"instance_class": instanceClass,
-				"region":        region,
+				"region":         region,
 			})
 			// Fallback to default rate if pricing API fails
 			price = 0.005

@@ -390,7 +390,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					var costDetails map[string]interface{}
 					if costEstimator != nil {
 						costCalculations++
-						
+
 						// Calculate EBS volume costs first - these are always included
 						var totalCosts *awslib.CostBreakdown
 						if len(ebsDetails) > 0 {
@@ -400,7 +400,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 								hoursRunning := ebs["HoursRunning"].(float64)
 
 								volumeCost, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-									ResourceType:  "EBSVolumes",
+									ResourceType: "EBSVolumes",
 									ResourceSize: volumeSize,
 									Region:       opts.Region,
 									CreationTime: time.Now().Add(-time.Duration(hoursRunning) * time.Hour),
@@ -429,8 +429,8 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						// Only calculate EC2 instance costs if the instance is running
 						if aws.StringValue(instance.State.Name) == "running" {
 							instanceCosts, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-								ResourceType:  "EC2Instances",
-								ResourceSize:  aws.StringValue(instance.InstanceType),
+								ResourceType: "EC2",
+								ResourceSize: aws.StringValue(instance.InstanceType),
 								Region:       opts.Region,
 								CreationTime: *instance.LaunchTime,
 							})
@@ -493,7 +493,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	// Log scan completion with metrics
 	scanDuration := time.Since(startTime)
 	logging.Info("Completed EC2 instance scan", map[string]interface{}{
-		"account_id":         accountID,
+		"account_id":        accountID,
 		"region":            opts.Region,
 		"total_instances":   totalInstances,
 		"unused_instances":  len(results),
