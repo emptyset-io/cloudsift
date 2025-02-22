@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/fatih/color"
@@ -18,6 +19,7 @@ const (
 	INFO
 	WARN
 	ERROR
+	PROGRESS // Special level that always displays
 )
 
 func (l Level) String() string {
@@ -30,6 +32,8 @@ func (l Level) String() string {
 		return "WARN"
 	case ERROR:
 		return "ERROR"
+	case PROGRESS:
+		return "PROGRESS"
 	default:
 		return "UNKNOWN"
 	}
@@ -45,9 +49,11 @@ const (
 
 // Logger handles structured logging
 type Logger struct {
-	out    io.Writer
-	level  Level
-	format Format
+	out         io.Writer
+	level       Level
+	format      Format
+	lastLogTime time.Time
+	logMutex    sync.RWMutex
 }
 
 // LogConfig contains logger configuration
@@ -64,16 +70,19 @@ type Account struct {
 
 var (
 	defaultLogger = &Logger{
-		out:    os.Stdout,
-		level:  INFO,
-		format: Text,
+		out:         os.Stdout,
+		level:       INFO,
+		format:      Text,
+		lastLogTime: time.Now(),
+		logMutex:    sync.RWMutex{},
 	}
 
 	// Color definitions
-	debugColor = color.New(color.FgCyan)
-	infoColor  = color.New(color.FgGreen)
-	warnColor  = color.New(color.FgYellow)
-	errorColor = color.New(color.FgRed)
+	debugColor    = color.New(color.FgCyan)
+	infoColor     = color.New(color.FgGreen)
+	warnColor     = color.New(color.FgYellow)
+	errorColor    = color.New(color.FgRed)
+	progressColor = color.New(color.FgBlue, color.Bold)
 )
 
 // Configure sets up the default logger
@@ -90,8 +99,16 @@ type logEntry struct {
 }
 
 func (l *Logger) log(level Level, msg string, data interface{}) {
-	if level < l.level {
+	// Always show PROGRESS level, otherwise respect level setting
+	if level != PROGRESS && level < l.level {
 		return
+	}
+
+	// Update last log time for non-PROGRESS logs
+	if level != PROGRESS {
+		l.logMutex.Lock()
+		l.lastLogTime = time.Now()
+		l.logMutex.Unlock()
 	}
 
 	timestamp := time.Now().Format("2006/01/02 15:04:05")
@@ -104,12 +121,12 @@ func (l *Logger) log(level Level, msg string, data interface{}) {
 			Data:      data,
 		}
 		if err := json.NewEncoder(l.out).Encode(entry); err != nil {
-			fmt.Fprintf(os.Stderr, "Error encoding log entry: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to encode log entry: %v\n", err)
 		}
 		return
 	}
 
-	// Text format with colors
+	// Text format
 	var levelColor *color.Color
 	switch level {
 	case DEBUG:
@@ -120,6 +137,10 @@ func (l *Logger) log(level Level, msg string, data interface{}) {
 		levelColor = warnColor
 	case ERROR:
 		levelColor = errorColor
+	case PROGRESS:
+		levelColor = progressColor
+	default:
+		levelColor = infoColor
 	}
 
 	levelStr := levelColor.Sprintf("%-5s", level.String())
@@ -147,6 +168,10 @@ func (l *Logger) Error(msg string, err error, data ...interface{}) {
 		msg = fmt.Sprintf("%s: %v", msg, err)
 	}
 	l.log(ERROR, msg, firstOrNil(data))
+}
+
+func (l *Logger) Progress(msg string, data interface{}) {
+	l.log(PROGRESS, msg, data)
 }
 
 // firstOrNil returns the first element of data if present, nil otherwise
@@ -222,6 +247,18 @@ func (l *Logger) ScanComplete(totalResults int) {
 	l.Info("Scan operation complete", data)
 }
 
+// GetLastLogTime returns the time of the last non-PROGRESS log
+func (l *Logger) GetLastLogTime() time.Time {
+	l.logMutex.RLock()
+	defer l.logMutex.RUnlock()
+	return l.lastLogTime
+}
+
+// GetLastLogTime returns the time of the last non-PROGRESS log using the default logger
+func GetLastLogTime() time.Time {
+	return defaultLogger.GetLastLogTime()
+}
+
 // Default logger methods
 func Debug(msg string, data ...interface{}) {
 	defaultLogger.Debug(msg, data...)
@@ -237,6 +274,10 @@ func Warn(msg string, data ...interface{}) {
 
 func Error(msg string, err error, data ...interface{}) {
 	defaultLogger.Error(msg, err, data...)
+}
+
+func Progress(msg string, data ...interface{}) {
+	defaultLogger.Progress(msg, firstOrNil(data))
 }
 
 func ScanStart(scanners []string, accounts []Account, regions []string) {

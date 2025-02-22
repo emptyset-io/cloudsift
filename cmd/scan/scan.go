@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -229,7 +230,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	if opts.organizationRole != "" && opts.scannerRole != "" {
 		logging.Info("Creating organization session", map[string]interface{}{
 			"organization_role": opts.organizationRole,
-			"scanner_role":     opts.scannerRole,
+			"scanner_role":      opts.scannerRole,
 		})
 		// Create org role session for listing accounts
 		baseSession, err = awsinternal.GetSessionChain(opts.organizationRole, "", "", "us-west-2")
@@ -385,7 +386,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		tickDuration := 30 * time.Second
+		ticker := time.NewTicker(tickDuration)
 		defer ticker.Stop()
 
 		for {
@@ -395,20 +397,36 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			case <-ticker.C:
 				running := progressMap.getRunning()
 				if len(running) > 0 {
-					// Convert running scanners to a more log-friendly format
-					var scannerInfo []map[string]interface{}
-					for _, prog := range running {
-						scannerInfo = append(scannerInfo, map[string]interface{}{
-							"account_id":    prog.AccountID,
-							"account_name":  prog.AccountName,
-							"region":        prog.Region,
-							"scanner":       prog.Scanner,
-							"result_count":  prog.ResultCount,
+					// Only emit progress if no logs in the last tick interval
+					lastLog := logging.GetLastLogTime()
+					if time.Since(lastLog) >= tickDuration {
+						// Log header
+						logging.Progress("Pending Scanners:", nil)
+
+						// Sort scanners by account ID and scanner name for consistent output
+						sort.Slice(running, func(i, j int) bool {
+							if running[i].AccountID != running[j].AccountID {
+								return running[i].AccountID < running[j].AccountID
+							}
+							return running[i].Scanner < running[j].Scanner
 						})
+
+						// Log each scanner on its own line
+						for _, prog := range running {
+							region := prog.Region
+							if region == "us-east-1" && (prog.Scanner == "IAM Roles" || prog.Scanner == "IAM Users") {
+								region = "global"
+							}
+
+							logging.Progress(fmt.Sprintf("  %s: %s (%s) in %s - %d results found",
+								prog.Scanner,
+								prog.AccountName,
+								prog.AccountID,
+								region,
+								prog.ResultCount,
+							), nil)
+						}
 					}
-					logging.Info("Currently running scanners", map[string]interface{}{
-						"scanners": scannerInfo,
-					})
 				}
 			}
 		}
@@ -504,13 +522,13 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Get worker pool metrics
 	metrics := pool.GetMetrics()
 	logging.Info("Worker pool metrics", map[string]interface{}{
-		"total_tasks":          metrics.TotalTasks,
-		"completed_tasks":      metrics.CompletedTasks,
-		"failed_tasks":         metrics.FailedTasks,
-		"peak_workers":         metrics.PeakWorkers,
-		"avg_execution_ms":     metrics.AverageExecutionMs,
-		"tasks_per_second":     float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000,
-		"worker_utilization":   float64(metrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
+		"total_tasks":        metrics.TotalTasks,
+		"completed_tasks":    metrics.CompletedTasks,
+		"failed_tasks":       metrics.FailedTasks,
+		"peak_workers":       metrics.PeakWorkers,
+		"avg_execution_ms":   metrics.AverageExecutionMs,
+		"tasks_per_second":   float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000,
+		"worker_utilization": float64(metrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
 	})
 
 	// Calculate total scans for metrics
