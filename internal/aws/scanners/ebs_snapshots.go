@@ -54,8 +54,16 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	// Create EC2 service client
 	svc := ec2.New(sess)
+
+	// Log the start of the scan with account details
+	logging.Debug("Starting EBS snapshot scan", map[string]interface{}{
+		"account_id": accountID,
+		"region":     opts.Region,
+	})
+
 	input := &ec2.DescribeSnapshotsInput{
-		OwnerIds: []*string{aws.String("self")},
+		OwnerIds: []*string{aws.String("self")}, // Only get snapshots owned by this account
+		MaxResults: nil, // Ensure we don't limit results per page
 	}
 
 	var results awslib.ScanResults
@@ -68,15 +76,17 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	var volumeLookups int
 	var costCalculations int
 
-	logging.Debug("Starting EBS snapshot scan", map[string]interface{}{
-		"account_id": accountID,
-		"region":     opts.Region,
-	})
-
 	err = svc.DescribeSnapshotsPages(input, func(page *ec2.DescribeSnapshotsOutput, lastPage bool) bool {
 		// Batch collect volume IDs that need lookup
 		volumesToLookup := make([]*string, 0)
 		snapshotsToProcess := make([]*ec2.Snapshot, 0)
+
+		logging.Debug("Processing snapshot page", map[string]interface{}{
+			"account_id":     accountID,
+			"region":        opts.Region,
+			"page_size":     len(page.Snapshots),
+			"is_last_page": lastPage,
+		})
 
 		for _, snapshot := range page.Snapshots {
 			snapshotsProcessed++
@@ -277,6 +287,8 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				})
 			}
 		}
+
+		// Always return true to continue pagination
 		return true
 	})
 
