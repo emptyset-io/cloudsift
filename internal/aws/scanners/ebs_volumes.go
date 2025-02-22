@@ -58,11 +58,34 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	clients := utils.CreateServiceClients(sess)
 	svc := ec2.New(sess) // Keep direct EC2 client for backward compatibility
 
-	input := &ec2.DescribeVolumesInput{}
+	// Initialize metrics
+	var totalVolumes int
+	var costCalculations int
+	startTime := time.Now()
+
+	// Log scan start
+	logging.Info("Starting EBS volume scan", map[string]interface{}{
+		"account_id": accountID,
+		"region":     opts.Region,
+	})
+
+	input := &ec2.DescribeVolumesInput{
+		MaxResults: nil, // Ensure we don't limit results per page
+	}
 
 	var results awslib.ScanResults
 	err = svc.DescribeVolumesPages(input, func(page *ec2.DescribeVolumesOutput, lastPage bool) bool {
+		// Log page processing
+		logging.Debug("Processing volume page", map[string]interface{}{
+			"account_id":   accountID,
+			"region":       opts.Region,
+			"page_size":    len(page.Volumes),
+			"is_last_page": lastPage,
+		})
+
 		for _, volume := range page.Volumes {
+			totalVolumes++
+
 			// Calculate age of volume
 			age := time.Since(*volume.CreateTime)
 			ageInDays := int(age.Hours() / 24)
@@ -89,11 +112,11 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				resourceName = name
 			}
 
-			// Calculate costs
+			// Calculate costs with error handling and metrics
 			costEstimator := awslib.DefaultCostEstimator
-
 			var costs *awslib.CostBreakdown
 			if costEstimator != nil {
+				costCalculations++
 				volumeSize := aws.Int64Value(volume.Size)
 				volumeType := aws.StringValue(volume.VolumeType)
 				hoursRunning := time.Since(*volume.CreateTime).Hours()
@@ -112,7 +135,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(volume.VolumeId),
 					})
-					continue
+					// Continue processing even if cost calculation fails
 				}
 
 				// Calculate lifetime cost
@@ -143,6 +166,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				"availability_zone":    aws.StringValue(volume.AvailabilityZone),
 				"account_id":           accountID,
 				"region":               opts.Region,
+				"tags":                 tags,
 			}
 
 			// Add attachments
@@ -170,73 +194,58 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				}
 			}
 
-			// Log that we found a result
-			logging.Debug("Found unused EBS volume", map[string]interface{}{
-				"account_id":    accountID,
-				"region":        opts.Region,
-				"resource_name": resourceName,
-				"resource_id":   aws.StringValue(volume.VolumeId),
-			})
-
-			// Get volume metrics
+			// Get volume metrics with error handling
 			volumeID := aws.StringValue(volume.VolumeId)
 			endTime := time.Now().UTC().Truncate(time.Minute)
-			// Ensure at least 24 hours between start and end time
 			daysUnused := awslib.Max(1, opts.DaysUnused)
-			startTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
-			metrics, err := s.getVolumeMetrics(clients.CloudWatch, volumeID, startTime, endTime)
+			metricStartTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
+			metrics, err := s.getVolumeMetrics(clients.CloudWatch, volumeID, metricStartTime, endTime)
 			if err != nil {
 				logging.Error("Failed to get volume metrics", err, map[string]interface{}{
 					"volume_id": volumeID,
-					"startTime": startTime.Format(time.RFC3339),
+					"startTime": metricStartTime.Format(time.RFC3339),
 					"endTime":   endTime.Format(time.RFC3339),
 				})
-				continue
+				// Continue processing even if metrics collection fails
 			}
 
+			// Build reasons
 			var reasons []string
-			// Check for detached volumes
 			if aws.StringValue(volume.State) == "available" {
 				reasons = append(reasons, fmt.Sprintf("Volume is not attached to any instance for %d days.", daysUnused))
 			}
 
-			// Check for low I/O activity
-			if metrics["read_ops"] == 0 && metrics["write_ops"] == 0 {
-				reasons = append(reasons, fmt.Sprintf("No read/write operations in the last %d days.", daysUnused))
-			} else if metrics["read_ops"] < 1 && metrics["write_ops"] < 1 {
-				reasons = append(reasons, fmt.Sprintf("Very low I/O activity (reads: %.2f/hour, writes: %.2f/hour) in the last %d days.",
-					metrics["read_ops"], metrics["write_ops"], daysUnused))
-			}
-
-			// Check for low utilization
-			if metrics["idle_time"] > 90 {
-				reasons = append(reasons, fmt.Sprintf("Volume is idle %.2f%% of the time in the last %d days.",
-					metrics["idle_time"], daysUnused))
-			}
-
-			if len(reasons) > 0 {
-				// Create details map with specific key format for ScanResult
-				details := map[string]interface{}{
-					"State":      aws.StringValue(volume.State),
-					"VolumeType": aws.StringValue(volume.VolumeType),
-					"Size":       aws.Int64Value(volume.Size),
-					"IOPS":       aws.Int64Value(volume.Iops),
-					"AccountId":  accountID,
-					"Region":     opts.Region,
+			// Add metrics-based reasons if available
+			if metrics != nil {
+				if readOps, ok := metrics["ReadOps"]; ok && readOps == 0 {
+					reasons = append(reasons, fmt.Sprintf("No read operations in the last %d days.", daysUnused))
 				}
-
-				results = append(results, awslib.ScanResult{
-					ResourceType: s.Label(),
-					ResourceName: resourceName,
-					ResourceID:   volumeID,
-					Reason:       strings.Join(reasons, "\n"),
-					Tags:         tags,
-					Details:      details,
-					Cost:         costDetails,
-				})
+				if writeOps, ok := metrics["WriteOps"]; ok && writeOps == 0 {
+					reasons = append(reasons, fmt.Sprintf("No write operations in the last %d days.", daysUnused))
+				}
 			}
+
+			// Create scan result
+			result := awslib.ScanResult{
+				ResourceID:   aws.StringValue(volume.VolumeId),
+				ResourceName: resourceName,
+				Details:      details,
+				Cost:         costDetails,
+				Reason:       strings.Join(reasons, "\n"),
+			}
+
+			results = append(results, result)
+
+			// Log individual result
+			logging.Info("Found unused EBS volume", map[string]interface{}{
+				"account_id":    accountID,
+				"region":        opts.Region,
+				"resource_name": resourceName,
+				"resource_id":   aws.StringValue(volume.VolumeId),
+				"age_days":      ageInDays,
+			})
 		}
-		return true
+		return true // Continue pagination
 	})
 
 	if err != nil {
@@ -244,8 +253,19 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			"account_id": accountID,
 			"region":     opts.Region,
 		})
-		return nil, fmt.Errorf("failed to describe volumes in %s: %w", opts.Region, err)
+		return nil, fmt.Errorf("failed to describe volumes: %w", err)
 	}
+
+	// Log scan completion with metrics
+	scanDuration := time.Since(startTime)
+	logging.Info("Completed EBS volume scan", map[string]interface{}{
+		"account_id":         accountID,
+		"region":            opts.Region,
+		"total_volumes":     totalVolumes,
+		"unused_volumes":    len(results),
+		"cost_calculations": costCalculations,
+		"duration_ms":       scanDuration.Milliseconds(),
+	})
 
 	return results, nil
 }
