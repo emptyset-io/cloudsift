@@ -174,23 +174,11 @@ func processResults(results []aws.ScanResult) TemplateData {
 	// Process each result
 	for _, result := range results {
 		// Extract account ID and region
-		accountID := ""
-		accountName := ""
+		accountID := result.AccountID
+		accountName := result.AccountName
 		region := ""
 
-		// Try both camelCase and snake_case keys
-		if id, ok := result.Details["AccountId"].(string); ok {
-			accountID = id
-		} else if id, ok := result.Details["account_id"].(string); ok {
-			accountID = id
-		}
-
-		if name, ok := result.Details["AccountName"].(string); ok {
-			accountName = name
-		} else if name, ok := result.Details["account_name"].(string); ok {
-			accountName = name
-		}
-
+		// Try to get region from details
 		if reg, ok := result.Details["Region"].(string); ok {
 			region = reg
 		} else if reg, ok := result.Details["region"].(string); ok {

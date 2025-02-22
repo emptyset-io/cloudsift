@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,25 +165,38 @@ var (
 	// singleton instance of the pool
 	sharedPool *Pool
 	// mutex for safe initialization of the shared pool
-	initOnce sync.Once
+	poolMutex sync.Mutex
 )
 
 // GetSharedPool returns the shared worker pool instance.
 // If the pool hasn't been initialized, it will be created using the MaxWorkers from global config.
 func GetSharedPool() *Pool {
-	initOnce.Do(func() {
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+	
+	if sharedPool == nil {
 		sharedPool = NewPool(config.Config.MaxWorkers)
 		sharedPool.Start()
-	})
+	}
 	return sharedPool
 }
 
 // InitSharedPool initializes the shared worker pool with the specified number of workers.
 // This should be called early in the application lifecycle if you want to customize the pool size.
 // If the pool is already initialized, this call will be ignored.
-func InitSharedPool(maxWorkers int) {
-	initOnce.Do(func() {
-		sharedPool = NewPool(maxWorkers)
-		sharedPool.Start()
-	})
+func InitSharedPool(maxWorkers int) error {
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+
+	if sharedPool != nil {
+		return nil // Pool already initialized
+	}
+
+	if maxWorkers <= 0 {
+		return fmt.Errorf("maxWorkers must be greater than 0, got %d", maxWorkers)
+	}
+
+	sharedPool = NewPool(maxWorkers)
+	sharedPool.Start()
+	return nil
 }

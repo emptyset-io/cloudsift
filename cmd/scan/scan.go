@@ -382,8 +382,9 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var resultsMutex sync.Mutex
 	progressMap := newScannerProgressMap()
 
-	// Create worker pool
-	workerPool := worker.NewPool(config.Config.MaxWorkers)
+	// Initialize shared worker pool
+	worker.InitSharedPool(config.Config.MaxWorkers)
+	workerPool := worker.GetSharedPool()
 
 	// Start progress logger
 	ctx, cancel := context.WithCancel(context.Background())
