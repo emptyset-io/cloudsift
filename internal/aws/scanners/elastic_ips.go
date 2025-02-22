@@ -16,9 +16,7 @@ import (
 type ElasticIPScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&ElasticIPScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register Elastic IP scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&ElasticIPScanner{})
 }
 
 // Name implements Scanner interface
@@ -75,14 +73,13 @@ func (s *ElasticIPScanner) checkNATGatewayAssociation(ec2Client *ec2.EC2, alloca
 
 // Scan implements Scanner interface
 func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID

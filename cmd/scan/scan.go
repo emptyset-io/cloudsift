@@ -8,14 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/spf13/cobra"
+
 	"cloudsift/internal/aws"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/output"
 	"cloudsift/internal/output/html"
 	"cloudsift/internal/worker"
-
-	"github.com/spf13/cobra"
 )
 
 type scanOptions struct {
@@ -108,6 +109,11 @@ type scanResult struct {
 	Results     map[string]aws.ScanResults `json:"results"` // Map of scanner name to results
 }
 
+// isIAMScanner returns true if the scanner is for IAM resources
+func isIAMScanner(scanner aws.Scanner) bool {
+	return scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users"
+}
+
 func getScanners(scannerList string) ([]aws.Scanner, error) {
 	var scanners []aws.Scanner
 
@@ -152,30 +158,36 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return fmt.Errorf("no scanners available")
 	}
 
-	// Get list of accounts to scan
+	// Get list of accounts to scan using organization role if provided
 	accounts, err := aws.ListAccounts(opts.organizationRole)
 	if err != nil {
 		return fmt.Errorf("failed to list accounts: %w", err)
 	}
 
-	// Create base session for validation
-	sess, err := aws.GetSession(opts.organizationRole)
-	if err != nil {
-		return fmt.Errorf("failed to create AWS session: %w", err)
+	// Create base sessions for each account
+	accountSessions := make(map[string]*session.Session)
+	for _, account := range accounts {
+		// Create session chain for scanning
+		// If we have both roles, this will chain: profile -> org role -> scanner role
+		scanSession, err := aws.GetSessionChain(opts.organizationRole, opts.scannerRole, "")
+		if err != nil {
+			return fmt.Errorf("failed to create session chain for account %s: %w", account.ID, err)
+		}
+		accountSessions[account.ID] = scanSession
 	}
 
 	// Get and validate regions
 	var regions []string
 	if opts.regions == "" {
 		// If no regions specified, get all available regions
-		regions, err = aws.GetAvailableRegions(sess)
+		regions, err = aws.GetAvailableRegions(accountSessions[accounts[0].ID])
 		if err != nil {
 			return fmt.Errorf("failed to get available regions: %w", err)
 		}
 	} else {
 		// Parse and validate comma-separated list of regions
 		regions = strings.Split(opts.regions, ",")
-		if err := aws.ValidateRegions(sess, regions); err != nil {
+		if err := aws.ValidateRegions(accountSessions[accounts[0].ID], regions); err != nil {
 			return fmt.Errorf("invalid regions: %w", err)
 		}
 	}
@@ -196,7 +208,6 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	startTime := time.Now()
-	totalScans := len(scanners) * len(regions) * len(accounts)
 	logging.ScanStart(scannerNames, accountInfo, regions)
 
 	// Initialize results map
@@ -209,27 +220,46 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	// Create tasks for each scanner+region combination
+	// Create tasks for each scanner+region+account combination
 	var tasks []worker.Task
 	var resultsMutex sync.Mutex
 
 	for _, scanner := range scanners {
-		for _, region := range regions {
+		// For IAM scanners, we only need to scan us-east-1 since IAM is global
+		scanRegions := regions
+		if isIAMScanner(scanner) {
+			scanRegions = []string{"us-east-1"}
+		}
+
+		for _, region := range scanRegions {
 			for _, account := range accounts {
 				scanner := scanner // Create new variable for closure
 				region := region
 				account := account
 
 				tasks = append(tasks, worker.Task(func(ctx context.Context) error {
-					logging.ScannerStart(scanner.Label(), account.ID, account.Name, region)
+					// For IAM scanners, always log region as "global"
+					logRegion := region
+					if isIAMScanner(scanner) {
+						logRegion = "global"
+					}
+					logging.ScannerStart(scanner.Label(), account.ID, account.Name, logRegion)
+
+					// Get the account's base session and create regional session
+					scanSession := accountSessions[account.ID]
+					regionSession, err := aws.GetSessionInRegion(scanSession, region)
+					if err != nil {
+						logging.ScannerError(scanner.Label(), account.ID, account.Name, logRegion, err)
+						return fmt.Errorf("failed to create regional session for account %s: %w", account.ID, err)
+					}
 
 					results, err := scanner.Scan(aws.ScanOptions{
 						Region:     region,
 						DaysUnused: opts.daysUnused,
-						Role:       opts.scannerRole,
+						Session:    regionSession,
 					})
 					if err != nil {
-						logging.ScannerError(scanner.Label(), account.ID, account.Name, region, err)
+						logging.ScannerError(scanner.Label(), account.ID, account.Name, logRegion, err)
 						return err
 					}
 
@@ -239,7 +269,12 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 							results[i].Details = make(map[string]interface{})
 						}
 						results[i].Details["account_id"] = account.ID
-						results[i].Details["region"] = region
+						// For IAM scanners, set region as "global", otherwise use actual region
+						if isIAMScanner(scanner) {
+							results[i].Details["region"] = "global"
+						} else {
+							results[i].Details["region"] = region
+						}
 					}
 
 					// Safely append results
@@ -256,7 +291,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					for i, r := range results {
 						resultInterfaces[i] = r
 					}
-					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, region, resultInterfaces)
+					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, logRegion, resultInterfaces)
 
 					return nil
 				}))
@@ -267,6 +302,16 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Create and run worker pool
 	pool := worker.NewPool(config.Config.MaxWorkers)
 	pool.ExecuteTasks(tasks)
+
+	// Calculate total scans for metrics
+	totalScans := 0
+	for _, scanner := range scanners {
+		if isIAMScanner(scanner) {
+			totalScans += len(accounts) // One scan per account for IAM
+		} else {
+			totalScans += len(accounts) * len(regions) // One scan per account per region for others
+		}
+	}
 
 	// Output results
 	switch opts.output {
@@ -290,19 +335,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				return fmt.Errorf("error creating reports directory: %v", err)
 			}
 
-			// Convert map of scan results to slice
+			// Collect all results
 			var allResults []aws.ScanResult
 			for _, accountResult := range accountResults {
 				for _, scannerResults := range accountResult.Results {
-					for _, result := range scannerResults {
-						// Add account and region to details
-						if result.Details == nil {
-							result.Details = make(map[string]interface{})
-						}
-						result.Details["account_id"] = accountResult.AccountID
-						result.Details["account_name"] = accountResult.AccountName
-						allResults = append(allResults, result)
-					}
+					allResults = append(allResults, scannerResults...)
 				}
 			}
 
@@ -319,10 +356,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				return fmt.Errorf("error writing HTML output: %v", err)
 			}
 			fmt.Printf("HTML report written to %s\n", outputPath)
-		case "s3":
-			// TODO: Implement S3 output
-			return fmt.Errorf("S3 output not yet implemented")
 		}
+	case "s3":
+		// TODO: Implement S3 output
+		return fmt.Errorf("S3 output not yet implemented")
 	}
 
 	logging.ScanComplete(len(accountResults))

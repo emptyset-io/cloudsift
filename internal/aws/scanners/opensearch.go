@@ -18,9 +18,7 @@ import (
 type OpenSearchScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&OpenSearchScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register OpenSearch scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&OpenSearchScanner{})
 }
 
 // Name implements Scanner interface
@@ -166,14 +164,13 @@ func (s *OpenSearchScanner) determineUnusedReasons(metrics map[string]float64, v
 
 // Scan implements Scanner interface
 func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID
@@ -218,7 +215,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		}
 
 		status := describeOutput.DomainStatus
-		
+
 		// Get cluster metrics
 		metrics, err := s.getClusterMetrics(cwClient, domainName, startTime, endTime)
 		if err != nil {
@@ -240,8 +237,8 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		if len(reasons) > 0 {
 			// Calculate cost
 			costConfig := awslib.ResourceCostConfig{
-				ResourceType:   "OpenSearch",
-				ResourceSize:   instanceType,
+				ResourceType:  "OpenSearch",
+				ResourceSize:  instanceType,
 				Region:        opts.Region,
 				CreationTime:  time.Now(), // OpenSearch API doesn't provide creation time
 				VolumeType:    volumeType,
@@ -257,15 +254,15 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 			}
 
 			details := map[string]interface{}{
-				"InstanceType":    instanceType,
-				"InstanceCount":   instanceCount,
+				"InstanceType":   instanceType,
+				"InstanceCount":  instanceCount,
 				"VolumeType":     volumeType,
 				"VolumeSizeGB":   volumeSize,
 				"CPUUtilization": metrics["cpu_utilization"],
 				"SearchRate":     metrics["search_rate"],
 				"IndexRate":      metrics["index_rate"],
 				"DocumentCount":  metrics["doc_count"],
-				"JVMMemory":     metrics["jvm_memory"],
+				"JVMMemory":      metrics["jvm_memory"],
 				"AccountId":      accountID,
 				"Region":         opts.Region,
 			}
@@ -278,8 +275,8 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				ResourceType: s.Label(),
 				ResourceName: domainName,
 				ResourceID:   aws.StringValue(status.ARN),
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			}
 
 			results = append(results, result)

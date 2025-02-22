@@ -2,77 +2,71 @@ package aws
 
 import (
 	"fmt"
-	"strings"
+	"sort"
+	"sync"
+
+	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 // ScanOptions contains configuration for the scan operation
 type ScanOptions struct {
-	Region     string // AWS region to scan
-	DaysUnused int    // Number of days a resource must be unused to be reported
-	Role       string // Role to assume for scanning
+	Region     string           // Region to scan
+	DaysUnused int              // Number of days a resource must be unused to be reported
+	Session    *session.Session // AWS session to use for scanning (already configured with necessary role chain)
 }
 
-// Scanner represents a resource scanner that can scan AWS resources
+// Scanner interface defines methods that must be implemented by resource scanners
 type Scanner interface {
-	// ArgumentName returns the command-line argument name for the scanner (e.g., "ebs-volumes")
-	ArgumentName() string
-
-	// Label returns a human-readable label for the scanner (e.g., "EBS Volumes")
-	Label() string
-
-	// Scan performs the actual scanning operation
-	// If region is empty, uses the default region from the session
+	Name() string         // Name returns the scanner's name for registry lookup
+	ArgumentName() string // ArgumentName returns the name used in CLI arguments
+	Label() string        // Label returns a human-readable label for the scanner
 	Scan(opts ScanOptions) (ScanResults, error)
 }
 
-// Registry maintains a central registry of all available scanners
-type Registry struct {
+// ScannerRegistry manages available scanners
+type ScannerRegistry struct {
 	scanners map[string]Scanner
+	mu       sync.RWMutex
 }
 
-// NewRegistry creates a new scanner registry
-func NewRegistry() *Registry {
-	return &Registry{
+// NewScannerRegistry creates a new scanner registry
+func NewScannerRegistry() *ScannerRegistry {
+	return &ScannerRegistry{
 		scanners: make(map[string]Scanner),
 	}
 }
 
-// RegisterScanner adds a new scanner to the registry
-func (r *Registry) RegisterScanner(s Scanner) error {
-	name := s.ArgumentName()
-	if _, exists := r.scanners[name]; exists {
-		return fmt.Errorf("scanner with name '%s' already registered", name)
-	}
-	r.scanners[name] = s
-	return nil
+// RegisterScanner registers a scanner with the registry
+func (r *ScannerRegistry) RegisterScanner(scanner Scanner) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.scanners[scanner.Name()] = scanner
 }
 
-// GetScanner retrieves a scanner by its name
-func (r *Registry) GetScanner(name string) (Scanner, error) {
-	// First try exact match
-	if scanner, ok := r.scanners[name]; ok {
-		return scanner, nil
-	}
+// GetScanner retrieves a scanner by name
+func (r *ScannerRegistry) GetScanner(name string) (Scanner, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	// Try case-insensitive match
-	nameLower := strings.ToLower(name)
-	for key, scanner := range r.scanners {
-		if strings.ToLower(key) == nameLower {
-			return scanner, nil
-		}
+	scanner, ok := r.scanners[name]
+	if !ok {
+		return nil, fmt.Errorf("scanner %s not found", name)
 	}
-
-	return nil, fmt.Errorf("scanner '%s' not found", name)
+	return scanner, nil
 }
 
-// ListScanners returns a sorted list of all registered scanner names
-func (r *Registry) ListScanners() []string {
+// ListScanners returns a sorted list of registered scanner names
+func (r *ScannerRegistry) ListScanners() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var names []string
 	for name := range r.scanners {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
-// DefaultRegistry is the default scanner registry instance
-var DefaultRegistry = NewRegistry()
+// DefaultRegistry is the default scanner registry
+var DefaultRegistry = NewScannerRegistry()

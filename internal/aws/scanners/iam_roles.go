@@ -17,9 +17,7 @@ import (
 type IAMRoleScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&IAMRoleScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register IAM Role scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&IAMRoleScanner{})
 }
 
 // Name implements Scanner interface
@@ -133,7 +131,7 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 		lastUsedDate := aws.TimeValue(lastUsedTime)
 		age := time.Since(lastUsedDate)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Role has not been used in %d days (last used: %s).", 
+			reasons = append(reasons, fmt.Sprintf("Role has not been used in %d days (last used: %s).",
 				opts.DaysUnused, lastUsedDate.Format("2006-01-02")))
 		}
 	}
@@ -148,14 +146,13 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 
 // Scan implements Scanner interface
 func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID
@@ -250,8 +247,8 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 				ResourceType: s.Label(),
 				ResourceName: roleName,
 				ResourceID:   roleARN,
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			}
 
 			results = append(results, result)

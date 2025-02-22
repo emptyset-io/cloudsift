@@ -18,9 +18,7 @@ import (
 type DynamoDBScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&DynamoDBScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register DynamoDB scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&DynamoDBScanner{})
 }
 
 // Name implements Scanner interface
@@ -131,14 +129,13 @@ func (s *DynamoDBScanner) determineUnusedReasons(metrics map[string]float64, ite
 
 // Scan implements Scanner interface
 func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID
@@ -221,12 +218,12 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 				"ItemCount":        aws.Int64Value(tableDesc.Table.ItemCount),
 				"TableSizeBytes":   aws.Int64Value(tableDesc.Table.TableSizeBytes),
 				"ReadThroughput":   metrics["read_throughput"],
-				"WriteThroughput": metrics["write_throughput"],
-				"ThrottledEvents": metrics["throttled_events"],
-				"account_id":      accountID,
-				"region":         opts.Region,
-				"BillingMode":    aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode),
-				"ProvisionedRead": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
+				"WriteThroughput":  metrics["write_throughput"],
+				"ThrottledEvents":  metrics["throttled_events"],
+				"account_id":       accountID,
+				"region":           opts.Region,
+				"BillingMode":      aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode),
+				"ProvisionedRead":  aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
 				"ProvisionedWrite": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits),
 			}
 
@@ -238,8 +235,8 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 				ResourceType: s.Label(),
 				ResourceName: *tableName,
 				ResourceID:   *tableName,
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			}
 
 			results = append(results, result)

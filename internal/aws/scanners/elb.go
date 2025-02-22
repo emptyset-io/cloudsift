@@ -24,9 +24,7 @@ const (
 type ELBScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&ELBScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register ELB scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&ELBScanner{})
 }
 
 // Name implements Scanner interface
@@ -284,14 +282,13 @@ func (s *ELBScanner) calculateELBCosts(lbType string) *awslib.CostBreakdown {
 
 // Scan implements Scanner interface
 func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID

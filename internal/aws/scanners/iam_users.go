@@ -18,9 +18,7 @@ import (
 type IAMUserScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register IAM User scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{})
 }
 
 // Name implements Scanner interface
@@ -102,7 +100,7 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 	} else {
 		age := time.Since(*lastLoginTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("User has not logged in for %d days (last login: %s).", 
+			reasons = append(reasons, fmt.Sprintf("User has not logged in for %d days (last login: %s).",
 				opts.DaysUnused, lastLoginTime.Format("2006-01-02")))
 		}
 	}
@@ -113,7 +111,7 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 	} else {
 		age := time.Since(*keyLastUsedTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Access key has not been used in %d days (last used: %s).", 
+			reasons = append(reasons, fmt.Sprintf("Access key has not been used in %d days (last used: %s).",
 				opts.DaysUnused, keyLastUsedTime.Format("2006-01-02")))
 		}
 	}
@@ -123,14 +121,13 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 
 // Scan implements Scanner interface
 func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID
@@ -188,8 +185,8 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 		if len(reasons) > 0 {
 			// Create details map with IAM user-specific fields
 			details := map[string]interface{}{
-				"AccountId":        accountID,
-				"Region":           opts.Region,
+				"AccountId":       accountID,
+				"Region":          opts.Region,
 				"Path":            aws.StringValue(user.Path),
 				"CreateDate":      aws.TimeValue(user.CreateDate).Format(time.RFC3339),
 				"LastLoginTime":   formatTimeOrNever(lastLoginTime),
@@ -205,8 +202,8 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 				ResourceType: s.Label(),
 				ResourceName: userName,
 				ResourceID:   userARN,
-				Reason:      strings.Join(reasons, "\n"),
-				Details:     details,
+				Reason:       strings.Join(reasons, "\n"),
+				Details:      details,
 			}
 
 			results = append(results, result)

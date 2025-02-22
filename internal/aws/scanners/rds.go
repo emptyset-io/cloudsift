@@ -18,9 +18,7 @@ import (
 type RDSScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&RDSScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register RDS scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&RDSScanner{})
 }
 
 // Name implements Scanner interface
@@ -40,14 +38,13 @@ func (s *RDSScanner) Label() string {
 
 // Scan implements Scanner interface
 func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID
@@ -208,7 +205,7 @@ func (s *RDSScanner) analyzeInstanceUsage(cwClient *cloudwatch.CloudWatch, insta
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch %s metrics: %w", metric.name, err)
 		}
-		
+
 		// GetResourceMetricsData returns a map[string]float64, convert to slice
 		if metricValue, ok := values[metric.name]; ok {
 			metricResults[metric.name] = []float64{metricValue}

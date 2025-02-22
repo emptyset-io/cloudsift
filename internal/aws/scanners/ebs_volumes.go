@@ -18,9 +18,7 @@ import (
 type EBSVolumeScanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&EBSVolumeScanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register EBS volume scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&EBSVolumeScanner{})
 }
 
 // Name implements Scanner interface
@@ -40,14 +38,13 @@ func (s *EBSVolumeScanner) Label() string {
 
 // Scan implements Scanner interface
 func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	// Create base session with region
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
 	// Get current account ID

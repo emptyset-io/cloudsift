@@ -14,13 +14,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-// S3Scanner scans for unused S3 buckets
+// S3Scanner scans S3 buckets for usage
 type S3Scanner struct{}
 
 func init() {
-	if err := awslib.DefaultRegistry.RegisterScanner(&S3Scanner{}); err != nil {
-		panic(fmt.Sprintf("Failed to register S3 scanner: %v", err))
-	}
+	awslib.DefaultRegistry.RegisterScanner(&S3Scanner{})
 }
 
 // Name implements Scanner interface
@@ -30,7 +28,7 @@ func (s *S3Scanner) Name() string {
 
 // ArgumentName implements Scanner interface
 func (s *S3Scanner) ArgumentName() string {
-	return "s3"
+	return "s3-buckets"
 }
 
 // Label implements Scanner interface
@@ -38,122 +36,139 @@ func (s *S3Scanner) Label() string {
 	return "S3 Buckets"
 }
 
-// getBucketObjectCount gets the current number of objects in an S3 bucket
-func (s *S3Scanner) getBucketObjectCount(s3Client *s3.S3, bucketName string) int64 {
-	input := &s3.ListObjectsV2Input{
-		Bucket: aws.String(bucketName),
-	}
-
-	output, err := s3Client.ListObjectsV2(input)
-	if err != nil {
-		logging.Error("Failed to list objects", err, map[string]interface{}{
-			"bucket": bucketName,
-		})
-		return 0
-	}
-
-	return aws.Int64Value(output.KeyCount)
-}
-
-// getBucketMetrics retrieves CloudWatch metrics for an S3 bucket
+// getBucketMetrics fetches CloudWatch metrics for a bucket
 func (s *S3Scanner) getBucketMetrics(cwClient *cloudwatch.CloudWatch, bucketName string, startTime, endTime time.Time) (map[string]float64, error) {
-	metricsMap := map[string]string{
-		"object_count":    "NumberOfObjects",
-		"bucket_size":     "BucketSizeBytes",
-		"get_requests":    "GetRequests",
-		"put_requests":    "PutRequests",
-		"delete_requests": "DeleteRequests",
+	metrics := []struct {
+		name      string
+		namespace string
+		metric    string
+		stat      string
+	}{
+		{
+			name:      "bucket_size",
+			namespace: "AWS/S3",
+			metric:    "BucketSizeBytes",
+			stat:      "Average",
+		},
+		{
+			name:      "get_requests",
+			namespace: "AWS/S3",
+			metric:    "GetRequests",
+			stat:      "Sum",
+		},
+		{
+			name:      "put_requests",
+			namespace: "AWS/S3",
+			metric:    "PutRequests",
+			stat:      "Sum",
+		},
+		{
+			name:      "delete_requests",
+			namespace: "AWS/S3",
+			metric:    "DeleteRequests",
+			stat:      "Sum",
+		},
 	}
 
 	results := make(map[string]float64)
-	for key, metricName := range metricsMap {
-		config := utils.MetricConfig{
-			Namespace:     "AWS/S3",
-			ResourceID:    bucketName,
-			DimensionName: "BucketName",
-			MetricName:    metricName,
-			Statistic:     "Average",
-			StartTime:     startTime.UTC(),
-			EndTime:       endTime.UTC(),
+	for _, metric := range metrics {
+		input := &cloudwatch.GetMetricStatisticsInput{
+			Namespace:  aws.String(metric.namespace),
+			MetricName: aws.String(metric.metric),
+			StartTime:  aws.Time(startTime),
+			EndTime:    aws.Time(endTime),
+			Period:     aws.Int64(86400), // 1 day
+			Statistics: []*string{
+				aws.String(metric.stat),
+			},
+			Dimensions: []*cloudwatch.Dimension{
+				{
+					Name:  aws.String("BucketName"),
+					Value: aws.String(bucketName),
+				},
+			},
 		}
 
-		value, err := utils.GetResourceMetrics(cwClient, config)
+		output, err := cwClient.GetMetricStatistics(input)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get metric %s: %w", metricName, err)
+			return nil, fmt.Errorf("failed to get metric %s: %w", metric.name, err)
 		}
 
-		results[key] = value
+		// Get the most recent datapoint
+		var value float64
+		if len(output.Datapoints) > 0 {
+			// Find the most recent datapoint
+			var latestPoint *cloudwatch.Datapoint
+			for _, point := range output.Datapoints {
+				if latestPoint == nil || point.Timestamp.After(*latestPoint.Timestamp) {
+					latestPoint = point
+				}
+			}
+
+			switch metric.stat {
+			case "Average":
+				value = aws.Float64Value(latestPoint.Average)
+			case "Sum":
+				value = aws.Float64Value(latestPoint.Sum)
+			}
+		}
+
+		results[metric.name] = value
 	}
 
 	return results, nil
 }
 
-// determineUnusedReasons checks if a bucket is unused
-func (s *S3Scanner) determineUnusedReasons(currentObjectCount int64, metrics map[string]float64, daysUnused int) []string {
-	var reasons []string
-
-	if currentObjectCount == 0 {
-		reasons = append(reasons, "Bucket is empty.")
-	}
-
-	if metrics["get_requests"] == 0 && metrics["put_requests"] == 0 && metrics["delete_requests"] == 0 {
-		if currentObjectCount > 0 {
-			reasons = append(reasons, fmt.Sprintf("Bucket has objects but no activity in the last %d days.", daysUnused))
-		} else {
-			reasons = append(reasons, fmt.Sprintf("Empty bucket with no activity in the last %d days.", daysUnused))
-		}
-	}
-
-	if metrics["put_requests"] == 0 && metrics["delete_requests"] == 0 && currentObjectCount > 0 {
-		if metrics["get_requests"] == 0 {
-			reasons = append(reasons, fmt.Sprintf("Static content with no access in the last %d days.", daysUnused))
-		} else if metrics["get_requests"] < 1 {
-			reasons = append(reasons, fmt.Sprintf("Static content with very low access (%.2f requests/hour) in the last %d days.",
-				metrics["get_requests"], daysUnused))
-		}
-	}
-
-	return reasons
-}
-
 // Scan implements Scanner interface
 func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
-	sess, err := awslib.GetSession(opts.Role, opts.Region)
+	// Get regional session
+	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
-		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+		logging.Error("Failed to create regional session", err, map[string]interface{}{
 			"region": opts.Region,
-			"role":   opts.Role,
 		})
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	// Create service clients
+	clients := struct {
+		S3         *s3.S3
+		CloudWatch *cloudwatch.CloudWatch
+	}{
+		S3:         s3.New(sess),
+		CloudWatch: cloudwatch.New(sess),
 	}
 
-	clients := utils.CreateServiceClients(sess)
-	s3Client := s3.New(sess)
-
-	var results awslib.ScanResults
-	endTime := time.Now().UTC().Truncate(time.Minute)
-	daysUnused := awslib.Max(1, opts.DaysUnused)
-	startTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
-
-	listOutput, err := s3Client.ListBuckets(&s3.ListBucketsInput{})
+	// List buckets in the current region
+	input := &s3.ListBucketsInput{}
+	output, err := clients.S3.ListBuckets(input)
 	if err != nil {
 		logging.Error("Failed to list S3 buckets", err, nil)
 		return nil, fmt.Errorf("failed to list S3 buckets: %w", err)
 	}
 
-	for _, bucket := range listOutput.Buckets {
-		bucketName := aws.StringValue(bucket.Name)
-		creationDate := aws.TimeValue(bucket.CreationDate)
+	// Get account ID for cost calculations
+	accountID, err := utils.GetAccountID(sess)
+	if err != nil {
+		logging.Error("Failed to get AWS account ID", err, nil)
+		return nil, fmt.Errorf("failed to get AWS account ID: %w", err)
+	}
 
-		locationOutput, err := s3Client.GetBucketLocation(&s3.GetBucketLocationInput{
-			Bucket: aws.String(bucketName),
-		})
+	// Time range for metrics (last 30 days)
+	endTime := time.Now()
+	startTime := endTime.AddDate(0, 0, -30)
+
+	var results awslib.ScanResults
+
+	// Process each bucket
+	for _, bucket := range output.Buckets {
+		bucketName := aws.StringValue(bucket.Name)
+
+		// Get bucket location
+		locInput := &s3.GetBucketLocationInput{
+			Bucket: bucket.Name,
+		}
+		locOutput, err := clients.S3.GetBucketLocation(locInput)
 		if err != nil {
 			logging.Error("Failed to get bucket location", err, map[string]interface{}{
 				"bucket": bucketName,
@@ -161,93 +176,77 @@ func (s *S3Scanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			continue
 		}
 
-		bucketRegion := aws.StringValue(locationOutput.LocationConstraint)
+		// Convert empty location (US East-1) to its proper name
+		bucketRegion := aws.StringValue(locOutput.LocationConstraint)
 		if bucketRegion == "" {
 			bucketRegion = "us-east-1"
 		}
 
+		// Skip if bucket is not in the target region
 		if bucketRegion != opts.Region {
-			logging.Debug("Skipping bucket in different region", map[string]interface{}{
-				"bucket":        bucketName,
-				"bucket_region": bucketRegion,
-				"target_region": opts.Region,
+			continue
+		}
+
+		// Get object count
+		objectCount := int64(0)
+		err = clients.S3.ListObjectsV2Pages(&s3.ListObjectsV2Input{
+			Bucket: aws.String(bucketName),
+		}, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+			objectCount += aws.Int64Value(page.KeyCount)
+			return !lastPage
+		})
+		if err != nil {
+			logging.Error("Failed to get bucket object count", err, map[string]interface{}{
+				"bucket": bucketName,
 			})
 			continue
 		}
 
-		logging.Debug("Analyzing S3 bucket", map[string]interface{}{
-			"bucket": bucketName,
-			"region": bucketRegion,
-		})
-
-		currentObjectCount := s.getBucketObjectCount(s3Client, bucketName)
-
+		// Get metrics for the bucket
 		metrics, err := s.getBucketMetrics(clients.CloudWatch, bucketName, startTime, endTime)
 		if err != nil {
 			logging.Error("Failed to get bucket metrics", err, map[string]interface{}{
-				"bucket":     bucketName,
+				"bucket":    bucketName,
 				"startTime": startTime.Format(time.RFC3339),
 				"endTime":   endTime.Format(time.RFC3339),
 			})
 			continue
 		}
 
-		// Try to get bucket versioning status
-		versioning, err := s3Client.GetBucketVersioning(&s3.GetBucketVersioningInput{
-			Bucket: aws.String(bucketName),
-		})
-		if err != nil {
-			logging.Error("Failed to get bucket versioning", err, map[string]interface{}{
-				"bucket": bucketName,
-			})
+		// Check for inactivity
+		var reasons []string
+		if metrics["get_requests"] == 0 && metrics["put_requests"] == 0 && metrics["delete_requests"] == 0 {
+			reasons = append(reasons, fmt.Sprintf("No GET, PUT, or DELETE requests in the last %d days", opts.DaysUnused))
 		}
 
-		// Try to get bucket encryption
-		encryption, err := s3Client.GetBucketEncryption(&s3.GetBucketEncryptionInput{
-			Bucket: aws.String(bucketName),
-		})
-		if err != nil {
-			logging.Debug("Failed to get bucket encryption", map[string]interface{}{
-				"bucket": bucketName,
-				"error":  err.Error(),
-			})
+		// Get bucket tags
+		tagsInput := &s3.GetBucketTaggingInput{
+			Bucket: bucket.Name,
 		}
-
-		reasons := s.determineUnusedReasons(currentObjectCount, metrics, daysUnused)
+		tags := make(map[string]string)
+		if tagsOutput, err := clients.S3.GetBucketTagging(tagsInput); err == nil {
+			for _, tag := range tagsOutput.TagSet {
+				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
+			}
+		}
 
 		if len(reasons) > 0 {
 			details := map[string]interface{}{
-				"ObjectCount":     currentObjectCount,
-				"Region":         bucketRegion,
+				"ObjectCount":     objectCount,
+				"Region":          bucketRegion,
 				"BucketSizeBytes": metrics["bucket_size"],
 				"GetRequests":     metrics["get_requests"],
 				"PutRequests":     metrics["put_requests"],
 				"DeleteRequests":  metrics["delete_requests"],
 				"AccountId":       accountID,
-				"CreationDate":    creationDate.Format(time.RFC3339),
-			}
-
-			// Add versioning status if available
-			if versioning != nil {
-				details["Versioning"] = aws.StringValue(versioning.Status)
-			}
-
-			// Add encryption information if available
-			if encryption != nil && encryption.ServerSideEncryptionConfiguration != nil {
-				rules := encryption.ServerSideEncryptionConfiguration.Rules
-				if len(rules) > 0 && rules[0].ApplyServerSideEncryptionByDefault != nil {
-					details["EncryptionType"] = aws.StringValue(rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm)
-					if rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
-						details["KMSKeyId"] = aws.StringValue(rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID)
-					}
-				}
 			}
 
 			result := awslib.ScanResult{
 				ResourceType: s.Label(),
 				ResourceName: bucketName,
-				ResourceID:   fmt.Sprintf("arn:aws:s3:::%s", bucketName),
+				ResourceID:   bucketName,
 				Reason:       strings.Join(reasons, "\n"),
+				Tags:         tags,
 				Details:      details,
 			}
 
