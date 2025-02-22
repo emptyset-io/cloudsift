@@ -34,6 +34,64 @@ type scanOptions struct {
 	daysUnused       int    // Number of days a resource must be unused to be reported
 }
 
+type scannerProgress struct {
+	AccountID   string
+	AccountName string
+	Region      string
+	Scanner     string
+	ResultCount int // Number of scan results found
+}
+
+type scannerProgressMap struct {
+	sync.RWMutex
+	progress map[string]*scannerProgress // key is accountID:region:scanner
+}
+
+func newScannerProgressMap() *scannerProgressMap {
+	return &scannerProgressMap{
+		progress: make(map[string]*scannerProgress),
+	}
+}
+
+func (s *scannerProgressMap) startScanner(accountID, accountName, region, scanner string) {
+	s.Lock()
+	defer s.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", accountID, region, scanner)
+	s.progress[key] = &scannerProgress{
+		AccountID:   accountID,
+		AccountName: accountName,
+		Region:      region,
+		Scanner:     scanner,
+		ResultCount: 0,
+	}
+}
+
+func (s *scannerProgressMap) updateResultCount(accountID, region, scanner string, count int) {
+	s.Lock()
+	defer s.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", accountID, region, scanner)
+	if prog, exists := s.progress[key]; exists {
+		prog.ResultCount = count
+	}
+}
+
+func (s *scannerProgressMap) completeScanner(accountID, region, scanner string) {
+	s.Lock()
+	defer s.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", accountID, region, scanner)
+	delete(s.progress, key)
+}
+
+func (s *scannerProgressMap) getRunning() []*scannerProgress {
+	s.RLock()
+	defer s.RUnlock()
+	var running []*scannerProgress
+	for _, prog := range s.progress {
+		running = append(running, prog)
+	}
+	return running
+}
+
 // NewScanCmd creates the scan command
 func NewScanCmd() *cobra.Command {
 	opts := &scanOptions{}
@@ -321,6 +379,40 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Create tasks for each scanner+region+account combination
 	var tasks []worker.Task
 	var resultsMutex sync.Mutex
+	progressMap := newScannerProgressMap()
+
+	// Start progress logger
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				running := progressMap.getRunning()
+				if len(running) > 0 {
+					// Convert running scanners to a more log-friendly format
+					var scannerInfo []map[string]interface{}
+					for _, prog := range running {
+						scannerInfo = append(scannerInfo, map[string]interface{}{
+							"account_id":    prog.AccountID,
+							"account_name":  prog.AccountName,
+							"region":        prog.Region,
+							"scanner":       prog.Scanner,
+							"result_count":  prog.ResultCount,
+						})
+					}
+					logging.Info("Currently running scanners", map[string]interface{}{
+						"scanners": scannerInfo,
+					})
+				}
+			}
+		}
+	}()
 
 	for _, scanner := range scanners {
 		// For IAM scanners, we only need to scan us-east-1 since IAM is global
@@ -343,6 +435,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					}
 					logging.ScannerStart(scanner.Label(), account.ID, account.Name, logRegion)
 
+					// Start tracking scanner progress
+					progressMap.startScanner(account.ID, account.Name, logRegion, scanner.Label())
+					defer progressMap.completeScanner(account.ID, logRegion, scanner.Label())
+
 					// Get the account's base session and create regional session
 					scanSession := accountSessions[account.ID]
 					regionSession, err := awsinternal.GetSessionInRegion(scanSession, region)
@@ -360,6 +456,9 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, logRegion, err)
 						return err
 					}
+
+					// Update result count with actual number of results found
+					progressMap.updateResultCount(account.ID, logRegion, scanner.Label(), len(results))
 
 					// Add account and region info to each result
 					for i := range results {

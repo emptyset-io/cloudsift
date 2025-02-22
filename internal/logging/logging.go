@@ -185,7 +185,7 @@ func (l *Logger) ScannerComplete(scanner, accountID, accountName, region string,
 		"account_id":   accountID,
 		"account_name": accountName,
 		"region":       region,
-		"count":        len(results),
+		"result_count": len(results),
 	}
 	l.Info("Scanner completed", data)
 
