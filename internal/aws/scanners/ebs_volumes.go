@@ -227,6 +227,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			// Create scan result
 			result := awslib.ScanResult{
+				ResourceType: s.Label(),
 				ResourceID:   aws.StringValue(volume.VolumeId),
 				ResourceName: resourceName,
 				Details:      details,

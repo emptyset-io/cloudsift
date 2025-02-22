@@ -2,5 +2,6 @@
   "EBSSnapshots:us-west-2:1:gp3::0": 0.05,
   "EBSVolumes:us-west-2:1:gp3::0": 0.08,
   "EBSVolumes:us-west-2:8:standard::0": 0.05,
-  "EC2:us-west-2:t2.nano:::0": 0.0058
+  "EC2:us-west-2:t2.nano:::0": 0.0058,
+  "EC2Instances:us-west-2": 0.2773
 }

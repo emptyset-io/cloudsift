@@ -236,10 +236,6 @@ func (s *EC2InstanceScanner) getEBSVolumes(ec2Client *ec2.EC2, instance *ec2.Ins
 
 func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Get regional session
-	logging.Debug("Creating regional session", map[string]interface{}{
-		"scanner": s.Label(),
-		"region":  opts.Region,
-	})
 	sess, err := awslib.GetSessionInRegion(opts.Session, opts.Region)
 	if err != nil {
 		logging.Error("Failed to create regional session", err, map[string]interface{}{
@@ -249,468 +245,260 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID and create service clients
+	// Get current account ID
 	accountID, err := utils.GetAccountID(sess)
 	if err != nil {
-		logging.Error("Failed to get AWS account ID", err, map[string]interface{}{
-			"scanner": s.Label(),
-			"region":  opts.Region,
-		})
-		return nil, fmt.Errorf("failed to get AWS account ID: %w", err)
+		logging.Error("Failed to get caller identity", err, nil)
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
-	logging.Debug("Creating service clients", map[string]interface{}{
-		"scanner":    s.Label(),
-		"region":     opts.Region,
+	// Initialize metrics
+	var totalInstances int
+	var costCalculations int
+	startTime := time.Now()
+
+	// Log scan start
+	logging.Info("Starting EC2 instance scan", map[string]interface{}{
 		"account_id": accountID,
+		"region":     opts.Region,
 	})
+
+	// Create service clients
 	clients := utils.CreateServiceClients(sess)
 	ec2Client := ec2.New(sess) // Keep direct EC2 client for backward compatibility
 
 	// Get instances
 	var results awslib.ScanResults
 	endTime := time.Now().UTC()
-	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
-	err = ec2Client.DescribeInstancesPages(&ec2.DescribeInstancesInput{},
-		func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
-			for _, reservation := range page.Reservations {
-				for _, instance := range reservation.Instances {
-					logging.Debug("Processing instance", map[string]interface{}{
-						"scanner":     s.Label(),
-						"region":      opts.Region,
-						"account_id":  accountID,
-						"instance_id": *instance.InstanceId,
+	metricStartTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
+
+	input := &ec2.DescribeInstancesInput{
+		MaxResults: nil, // Ensure we don't limit results per page
+	}
+
+	err = ec2Client.DescribeInstancesPages(input, func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
+		// Log page processing
+		logging.Debug("Processing instance page", map[string]interface{}{
+			"account_id":   accountID,
+			"region":       opts.Region,
+			"reservations": len(page.Reservations),
+			"is_last_page": lastPage,
+		})
+
+		for _, reservation := range page.Reservations {
+			for _, instance := range reservation.Instances {
+				totalInstances++
+
+				// Skip terminated instances
+				if aws.StringValue(instance.State.Name) == "terminated" {
+					logging.Debug("Skipping terminated instance", map[string]interface{}{
+						"instance_id": aws.StringValue(instance.InstanceId),
 					})
+					continue
+				}
 
-					// Skip terminated instances
-					if *instance.State.Name == "terminated" {
-						logging.Debug("Skipping terminated instance", map[string]interface{}{
-							"scanner":     s.Label(),
-							"region":      opts.Region,
-							"account_id":  accountID,
-							"instance_id": *instance.InstanceId,
-						})
-						continue
+				// Get instance name from tags
+				name := aws.StringValue(instance.InstanceId)
+				for _, tag := range instance.Tags {
+					if aws.StringValue(tag.Key) == "Name" {
+						name = aws.StringValue(tag.Value)
+						break
 					}
+				}
 
-					// Get EBS details for the instance
-					ebsDetails, err := s.getEBSVolumes(ec2Client, instance, time.Since(*instance.LaunchTime).Hours())
+				// Convert AWS tags to map
+				tags := make(map[string]string)
+				for _, tag := range instance.Tags {
+					tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
+				}
+
+				// Get EBS details for the instance
+				ebsDetails, err := s.getEBSVolumes(ec2Client, instance, time.Since(*instance.LaunchTime).Hours())
+				if err != nil {
+					logging.Warn("Failed to get EBS details for instance", map[string]interface{}{
+						"instance_id": aws.StringValue(instance.InstanceId),
+						"error":       err.Error(),
+					})
+				}
+
+				// Check if instance is unused based on state
+				var reasons []string
+				if aws.StringValue(instance.State.Name) == "stopped" {
+					logging.Info("Found stopped instance", map[string]interface{}{
+						"instance_id": aws.StringValue(instance.InstanceId),
+						"name":        name,
+					})
+					reasons = append(reasons, "Instance is stopped")
+				} else if aws.StringValue(instance.State.Name) != "running" {
+					reasons = append(reasons, fmt.Sprintf("Non-running state: %s", aws.StringValue(instance.State.Name)))
+				} else {
+					// Analyze running instances using launch time
+					usageReasons, err := s.analyzeInstanceUsage(clients.CloudWatch, instance, metricStartTime, endTime, opts.DaysUnused)
 					if err != nil {
-						logging.Warn("Failed to get EBS details for instance", map[string]interface{}{
-							"scanner":     s.Label(),
-							"region":      opts.Region,
-							"account_id":  accountID,
-							"instance_id": *instance.InstanceId,
-							"error":       err.Error(),
+						logging.Error("Failed to analyze instance usage", err, map[string]interface{}{
+							"instance_id": aws.StringValue(instance.InstanceId),
 						})
-					}
-
-					// Check if instance is unused based on state
-					var reasons []string
-					if *instance.State.Name == "stopped" {
-						logging.Info("Found stopped instance", map[string]interface{}{
-							"scanner":     s.Label(),
-							"region":      opts.Region,
-							"account_id":  accountID,
-							"instance_id": *instance.InstanceId,
-						})
-						reasons = append(reasons, "Instance is stopped")
-					} else if *instance.State.Name != "running" {
-						// Handle non-running instances
-						reasons = append(reasons, fmt.Sprintf("Non-running state: %s", *instance.State.Name))
 					} else {
-						// Analyze running instances using launch time
-						reasons, err = s.analyzeInstanceUsage(clients.CloudWatch, instance, startTime, endTime, opts.DaysUnused)
-						if err != nil {
-							logging.Error("Failed to analyze instance usage", err, map[string]interface{}{
-								"scanner":     s.Label(),
-								"region":      opts.Region,
-								"account_id":  accountID,
-								"instance_id": *instance.InstanceId,
-							})
-						}
+						reasons = append(reasons, usageReasons...)
+					}
+				}
+
+				// If we found reasons the instance is unused, add it to results
+				if len(reasons) > 0 {
+					// Build result details with all available attributes
+					details := map[string]interface{}{
+						"architecture":        aws.StringValue(instance.Architecture),
+						"ami_id":              aws.StringValue(instance.ImageId),
+						"instance_id":         aws.StringValue(instance.InstanceId),
+						"instance_type":       aws.StringValue(instance.InstanceType),
+						"kernel_id":           aws.StringValue(instance.KernelId),
+						"key_name":            aws.StringValue(instance.KeyName),
+						"launch_time":         instance.LaunchTime.Format(time.RFC3339),
+						"platform":            aws.StringValue(instance.Platform),
+						"private_dns_name":    aws.StringValue(instance.PrivateDnsName),
+						"private_ip_address":  aws.StringValue(instance.PrivateIpAddress),
+						"public_dns_name":     aws.StringValue(instance.PublicDnsName),
+						"public_ip_address":   aws.StringValue(instance.PublicIpAddress),
+						"ramdisk_id":          aws.StringValue(instance.RamdiskId),
+						"root_device_name":    aws.StringValue(instance.RootDeviceName),
+						"root_device_type":    aws.StringValue(instance.RootDeviceType),
+						"source_dest_check":   aws.BoolValue(instance.SourceDestCheck),
+						"state":               aws.StringValue(instance.State.Name),
+						"state_code":          aws.Int64Value(instance.State.Code),
+						"subnet_id":           aws.StringValue(instance.SubnetId),
+						"vpc_id":              aws.StringValue(instance.VpcId),
+						"hours_running":       time.Since(*instance.LaunchTime).Hours(),
+						"ebs_optimized":       aws.BoolValue(instance.EbsOptimized),
+						"ena_support":         aws.BoolValue(instance.EnaSupport),
+						"hypervisor":          aws.StringValue(instance.Hypervisor),
+						"virtualization_type": aws.StringValue(instance.VirtualizationType),
+						"tags":                tags,
 					}
 
-					// If we found reasons the instance is unused, add it to results
-					if len(reasons) > 0 {
-						// Get instance name from tags
-						name := ""
-						for _, tag := range instance.Tags {
-							if *tag.Key == "Name" {
-								name = *tag.Value
-								break
-							}
-						}
+					// Add state reason if present
+					if instance.StateReason != nil {
+						details["state_reason"] = aws.StringValue(instance.StateReason.Message)
+					}
 
-						logging.Info("Found unused instance", map[string]interface{}{
-							"scanner":     s.Label(),
-							"region":      opts.Region,
-							"account_id":  accountID,
-							"instance_id": *instance.InstanceId,
-							"name":        name,
-							"reasons":     reasons,
-						})
+					// Add EBS details if available
+					if len(ebsDetails) > 0 {
+						details["ebs_volumes"] = ebsDetails
+					}
 
-						// Convert AWS tags to map
-						tags := make(map[string]string)
-						for _, tag := range instance.Tags {
-							tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
-						}
+					// Calculate costs
+					costEstimator := awslib.DefaultCostEstimator
+					var costDetails map[string]interface{}
+					if costEstimator != nil {
+						costCalculations++
+						
+						// Calculate EBS volume costs first - these are always included
+						var totalCosts *awslib.CostBreakdown
+						if len(ebsDetails) > 0 {
+							for _, ebs := range ebsDetails {
+								volumeSize := ebs["SizeGB"].(int64)
+								volumeType := ebs["VolumeType"].(string)
+								hoursRunning := ebs["HoursRunning"].(float64)
 
-						// Get resource name from tags or use instance ID
-						resourceName := aws.StringValue(instance.InstanceId)
-						if name, ok := tags["Name"]; ok {
-							resourceName = name
-						}
+								volumeCost, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
+									ResourceType:  "EBSVolumes",
+									ResourceSize: volumeSize,
+									Region:       opts.Region,
+									CreationTime: time.Now().Add(-time.Duration(hoursRunning) * time.Hour),
+									VolumeType:   volumeType,
+								})
+								if err != nil {
+									logging.Error("Failed to calculate EBS volume costs", err, map[string]interface{}{
+										"instance_id": aws.StringValue(instance.InstanceId),
+										"volume_size": volumeSize,
+										"volume_type": volumeType,
+									})
+									continue
+								}
 
-						instanceState := aws.StringValue(instance.State.Name)
-
-						// Build result details with all available attributes
-						details := map[string]interface{}{
-							"architecture":       aws.StringValue(instance.Architecture),
-							"ami_id":             aws.StringValue(instance.ImageId),
-							"instance_id":        aws.StringValue(instance.InstanceId),
-							"instance_type":      aws.StringValue(instance.InstanceType),
-							"kernel_id":          aws.StringValue(instance.KernelId),
-							"key_name":           aws.StringValue(instance.KeyName),
-							"launch_time":        instance.LaunchTime.Format(time.RFC3339),
-							"platform":           aws.StringValue(instance.Platform),
-							"private_dns_name":   aws.StringValue(instance.PrivateDnsName),
-							"private_ip_address": aws.StringValue(instance.PrivateIpAddress),
-							"public_dns_name":    aws.StringValue(instance.PublicDnsName),
-							"public_ip_address":  aws.StringValue(instance.PublicIpAddress),
-							"ramdisk_id":         aws.StringValue(instance.RamdiskId),
-							"root_device_name":   aws.StringValue(instance.RootDeviceName),
-							"root_device_type":   aws.StringValue(instance.RootDeviceType),
-							"source_dest_check":  aws.BoolValue(instance.SourceDestCheck),
-							"state":              aws.StringValue(instance.State.Name),
-							"state_code":         aws.Int64Value(instance.State.Code),
-							"subnet_id":          aws.StringValue(instance.SubnetId),
-							"vpc_id":             aws.StringValue(instance.VpcId),
-							"hours_running":      time.Since(*instance.LaunchTime).Hours(),
-							"ebs_optimized":      aws.BoolValue(instance.EbsOptimized),
-							"ena_support":        aws.BoolValue(instance.EnaSupport),
-							"hypervisor":         aws.StringValue(instance.Hypervisor),
-							"virtualization_type": aws.StringValue(instance.VirtualizationType),
-						}
-
-						// Add state reason
-						if instance.StateReason != nil {
-							details["state_reason"] = aws.StringValue(instance.StateReason.Message)
-						} else {
-							details["state_reason"] = ""
-						}
-
-						// Add monitoring state
-						if instance.Monitoring != nil {
-							details["monitoring_state"] = aws.StringValue(instance.Monitoring.State)
-						} else {
-							details["monitoring_state"] = ""
-						}
-
-						// Add placement
-						if instance.Placement != nil {
-							details["placement"] = map[string]interface{}{
-								"availability_zone": aws.StringValue(instance.Placement.AvailabilityZone),
-								"affinity":         aws.StringValue(instance.Placement.Affinity),
-								"group_name":       aws.StringValue(instance.Placement.GroupName),
-								"host_id":          aws.StringValue(instance.Placement.HostId),
-								"tenancy":          aws.StringValue(instance.Placement.Tenancy),
-							}
-						} else {
-							details["placement"] = map[string]interface{}{}
-						}
-
-						// Add network interfaces
-						var networkInterfaces []map[string]interface{}
-						for _, ni := range instance.NetworkInterfaces {
-							niDetails := map[string]interface{}{
-								"network_interface_id": aws.StringValue(ni.NetworkInterfaceId),
-								"description":          aws.StringValue(ni.Description),
-								"status":               aws.StringValue(ni.Status),
-								"mac_address":          aws.StringValue(ni.MacAddress),
-								"private_ip_address":   aws.StringValue(ni.PrivateIpAddress),
-								"private_dns_name":     aws.StringValue(ni.PrivateDnsName),
-								"source_dest_check":    aws.BoolValue(ni.SourceDestCheck),
-								"subnet_id":            aws.StringValue(ni.SubnetId),
-								"vpc_id":               aws.StringValue(ni.VpcId),
-							}
-							networkInterfaces = append(networkInterfaces, niDetails)
-						}
-						details["network_interfaces"] = networkInterfaces
-
-						// Add security groups
-						var securityGroups []map[string]interface{}
-						for _, sg := range instance.SecurityGroups {
-							sgDetails := map[string]interface{}{
-								"group_id":   aws.StringValue(sg.GroupId),
-								"group_name": aws.StringValue(sg.GroupName),
-							}
-							securityGroups = append(securityGroups, sgDetails)
-						}
-						details["security_groups"] = securityGroups
-
-						// Add block device mappings
-						var blockDevices []map[string]interface{}
-						for _, bd := range instance.BlockDeviceMappings {
-							bdDetails := map[string]interface{}{
-								"device_name": aws.StringValue(bd.DeviceName),
-							}
-							if bd.Ebs != nil {
-								bdDetails["ebs"] = map[string]interface{}{
-									"attach_time":           aws.TimeValue(bd.Ebs.AttachTime).Format(time.RFC3339),
-									"delete_on_termination": aws.BoolValue(bd.Ebs.DeleteOnTermination),
-									"status":                aws.StringValue(bd.Ebs.Status),
-									"volume_id":             aws.StringValue(bd.Ebs.VolumeId),
+								if totalCosts == nil {
+									totalCosts = volumeCost
+								} else {
+									totalCosts.HourlyRate += volumeCost.HourlyRate
+									totalCosts.DailyRate += volumeCost.DailyRate
+									totalCosts.MonthlyRate += volumeCost.MonthlyRate
+									totalCosts.YearlyRate += volumeCost.YearlyRate
 								}
 							}
-							blockDevices = append(blockDevices, bdDetails)
-						}
-						details["block_device_mappings"] = blockDevices
-
-						if len(ebsDetails) > 0 {
-							details["ebs_volumes"] = ebsDetails
 						}
 
-						// Calculate costs
-						costEstimator := awslib.DefaultCostEstimator
-
-						var instanceCosts *awslib.CostBreakdown
-						var ebsCosts *awslib.CostBreakdown
-						var totalCosts *awslib.CostBreakdown
-
-						if costEstimator != nil {
-							// Calculate instance costs
-							hoursRunning := time.Since(*instance.LaunchTime).Hours()
-							logging.Debug("Calculating instance costs", map[string]interface{}{
-								"instance_id":   aws.StringValue(instance.InstanceId),
-								"instance_type": aws.StringValue(instance.InstanceType),
-								"region":        opts.Region,
-								"hours_running": hoursRunning,
-							})
-							instanceCosts, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-								ResourceType: "EC2",
-								ResourceSize: aws.StringValue(instance.InstanceType),
+						// Only calculate EC2 instance costs if the instance is running
+						if aws.StringValue(instance.State.Name) == "running" {
+							instanceCosts, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
+								ResourceType:  "EC2Instances",
+								ResourceSize:  aws.StringValue(instance.InstanceType),
 								Region:       opts.Region,
 								CreationTime: *instance.LaunchTime,
 							})
 							if err != nil {
-								logging.Error("Failed to calculate instance costs", err, map[string]interface{}{
-									"account_id":    accountID,
-									"region":        opts.Region,
-									"resource_name": resourceName,
-									"resource_id":   aws.StringValue(instance.InstanceId),
+								logging.Error("Failed to calculate EC2 instance costs", err, map[string]interface{}{
+									"instance_id": aws.StringValue(instance.InstanceId),
 								})
 							} else if instanceCosts != nil {
-								// Calculate lifetime cost for the instance
-								lifetime := roundCost(instanceCosts.HourlyRate * hoursRunning)
-								instanceCosts.Lifetime = &lifetime
-								instanceCosts.HoursRunning = &hoursRunning
-							}
-
-							// Calculate EBS volume costs
-							if len(ebsDetails) > 0 {
-								logging.Debug("Calculating EBS volume costs", map[string]interface{}{
-									"instance_id":  aws.StringValue(instance.InstanceId),
-									"volume_count": len(ebsDetails),
-									"region":       opts.Region,
-								})
-								ebsCosts = &awslib.CostBreakdown{}
-								for _, ebs := range ebsDetails {
-									volumeSize := ebs["SizeGB"].(int64)
-									volumeType := ebs["VolumeType"].(string)
-									hoursRunning := ebs["HoursRunning"].(float64)
-
-									volumeCost, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-										ResourceType: "EBSVolumes",
-										ResourceSize: volumeSize,
-										Region:       opts.Region,
-										CreationTime: time.Now().Add(-time.Duration(hoursRunning) * time.Hour),
-										VolumeType:   volumeType,
-									})
-									if err != nil {
-										logging.Error("Failed to calculate EBS costs", err, map[string]interface{}{
-											"account_id":    accountID,
-											"region":        opts.Region,
-											"resource_name": resourceName,
-											"resource_id":   aws.StringValue(instance.InstanceId),
-										})
-										continue
-									}
-
-									// Calculate lifetime cost for this volume
-									lifetime := roundCost(volumeCost.HourlyRate * hoursRunning)
-									volumeCost.Lifetime = &lifetime
-									volumeCost.HoursRunning = &hoursRunning
-
-									if ebsCosts == nil {
-										ebsCosts = volumeCost
-									} else {
-										ebsCosts.HourlyRate += volumeCost.HourlyRate
-										ebsCosts.DailyRate += volumeCost.DailyRate
-										ebsCosts.MonthlyRate += volumeCost.MonthlyRate
-										ebsCosts.YearlyRate += volumeCost.YearlyRate
-										if volumeCost.Lifetime != nil {
-											if ebsCosts.Lifetime == nil {
-												ebsCosts.Lifetime = volumeCost.Lifetime
-											} else {
-												lifetime := *ebsCosts.Lifetime + *volumeCost.Lifetime
-												ebsCosts.Lifetime = &lifetime
-											}
-										}
-									}
+								if totalCosts == nil {
+									totalCosts = instanceCosts
+								} else {
+									totalCosts.HourlyRate += instanceCosts.HourlyRate
+									totalCosts.DailyRate += instanceCosts.DailyRate
+									totalCosts.MonthlyRate += instanceCosts.MonthlyRate
+									totalCosts.YearlyRate += instanceCosts.YearlyRate
 								}
 							}
-
-							// Calculate total costs by combining instance and EBS costs
-							totalCosts = &awslib.CostBreakdown{}
-							logging.Debug("Calculating total costs", map[string]interface{}{
-								"instance_id":    aws.StringValue(instance.InstanceId),
-								"has_ebs_costs":  ebsCosts != nil,
-								"has_inst_costs": instanceCosts != nil,
-								"instance_state": instanceState,
-							})
-							// Always include EBS costs
-							if ebsCosts != nil {
-								totalCosts.HourlyRate = ebsCosts.HourlyRate
-								totalCosts.DailyRate = ebsCosts.DailyRate
-								totalCosts.MonthlyRate = ebsCosts.MonthlyRate
-								totalCosts.YearlyRate = ebsCosts.YearlyRate
-								totalCosts.Lifetime = ebsCosts.Lifetime
-								totalCosts.HoursRunning = ebsCosts.HoursRunning
-							}
-
-							// Only include instance costs if the instance is not stopped
-							if instanceState != "stopped" && instanceCosts != nil {
-								totalCosts.HourlyRate += instanceCosts.HourlyRate
-								totalCosts.DailyRate += instanceCosts.DailyRate
-								totalCosts.MonthlyRate += instanceCosts.MonthlyRate
-								totalCosts.YearlyRate += instanceCosts.YearlyRate
-								if instanceCosts.Lifetime != nil {
-									if totalCosts.Lifetime == nil {
-										totalCosts.Lifetime = instanceCosts.Lifetime
-									} else {
-										lifetime := *totalCosts.Lifetime + *instanceCosts.Lifetime
-										totalCosts.Lifetime = &lifetime
-									}
-								}
-								if instanceCosts.HoursRunning != nil {
-									if totalCosts.HoursRunning == nil {
-										totalCosts.HoursRunning = instanceCosts.HoursRunning
-									} else {
-										// Use the max hours running between instance and EBS
-										if *instanceCosts.HoursRunning > *totalCosts.HoursRunning {
-											totalCosts.HoursRunning = instanceCosts.HoursRunning
-										}
-									}
-								}
-							}
-
-							// Debug cost information
-							costLogData := map[string]interface{}{
-								"instance_id": aws.StringValue(instance.InstanceId),
-								"state":       instanceState,
-							}
-
-							if instanceCosts != nil {
-								costLogData["instance_costs"] = map[string]interface{}{
-									"hourly_rate":  instanceCosts.HourlyRate,
-									"daily_rate":   instanceCosts.DailyRate,
-									"monthly_rate": instanceCosts.MonthlyRate,
-									"yearly_rate":  instanceCosts.YearlyRate,
-								}
-								if instanceCosts.Lifetime != nil {
-									costLogData["instance_costs"].(map[string]interface{})["lifetime"] = *instanceCosts.Lifetime
-								}
-								if instanceCosts.HoursRunning != nil {
-									costLogData["instance_costs"].(map[string]interface{})["hours_running"] = *instanceCosts.HoursRunning
-								}
-							}
-
-							if ebsCosts != nil {
-								costLogData["ebs_costs"] = map[string]interface{}{
-									"hourly_rate":  ebsCosts.HourlyRate,
-									"daily_rate":   ebsCosts.DailyRate,
-									"monthly_rate": ebsCosts.MonthlyRate,
-									"yearly_rate":  ebsCosts.YearlyRate,
-								}
-								if ebsCosts.Lifetime != nil {
-									costLogData["ebs_costs"].(map[string]interface{})["lifetime"] = *ebsCosts.Lifetime
-								}
-								if ebsCosts.HoursRunning != nil {
-									costLogData["ebs_costs"].(map[string]interface{})["hours_running"] = *ebsCosts.HoursRunning
-								}
-							}
-
-							if totalCosts != nil {
-								costLogData["total_costs"] = map[string]interface{}{
-									"hourly_rate":  totalCosts.HourlyRate,
-									"daily_rate":   totalCosts.DailyRate,
-									"monthly_rate": totalCosts.MonthlyRate,
-									"yearly_rate":  totalCosts.YearlyRate,
-								}
-								if totalCosts.Lifetime != nil {
-									costLogData["total_costs"].(map[string]interface{})["lifetime"] = *totalCosts.Lifetime
-								}
-								if totalCosts.HoursRunning != nil {
-									costLogData["total_costs"].(map[string]interface{})["hours_running"] = *totalCosts.HoursRunning
-								}
-							}
-
-							logging.Debug("Cost breakdown for instance", costLogData)
 						}
 
-						// Add costs to result
-						costs := map[string]interface{}{
-							"total": totalCosts,
+						if totalCosts != nil {
+							costDetails = map[string]interface{}{
+								"total": totalCosts,
+							}
 						}
-						if instanceState != "stopped" && instanceCosts != nil {
-							costs["instance"] = instanceCosts
-						}
-						if ebsCosts != nil {
-							costs["ebs"] = ebsCosts
-						}
-
-						result := awslib.ScanResult{
-							ResourceType: s.Label(),
-							ResourceName: resourceName,
-							ResourceID:   aws.StringValue(instance.InstanceId),
-							Details:      details,
-							Tags:         tags,
-							Cost:         costs,
-						}
-
-						if len(reasons) > 0 {
-							result.Reason = strings.Join(reasons, ", ")
-						}
-
-						results = append(results, result)
-					} else {
-						logging.Debug("Instance is in use", map[string]interface{}{
-							"scanner":       s.Label(),
-							"region":        opts.Region,
-							"account_id":    accountID,
-							"instance_id":   *instance.InstanceId,
-							"instance_type": *instance.InstanceType,
-							"launch_time":   instance.LaunchTime.Format(time.RFC3339),
-							"state":         *instance.State.Name,
-						})
 					}
+
+					// Create scan result
+					result := awslib.ScanResult{
+						ResourceType: s.Label(),
+						ResourceID:   aws.StringValue(instance.InstanceId),
+						ResourceName: name,
+						Details:      details,
+						Cost:         costDetails,
+						Reason:       strings.Join(reasons, "\n"),
+					}
+
+					results = append(results, result)
+
+					// Log individual result
+					logging.Info("Found unused instance", map[string]interface{}{
+						"instance_id": aws.StringValue(instance.InstanceId),
+						"name":        name,
+						"state":       aws.StringValue(instance.State.Name),
+						"reasons":     reasons,
+					})
 				}
 			}
-			return !lastPage
-		})
+		}
+		return true // Continue pagination
+	})
 
 	if err != nil {
-		logging.Error("Failed to describe EC2 instances", err, nil)
-		return nil, fmt.Errorf("failed to describe EC2 instances: %w", err)
+		logging.Error("Failed to describe instances", err, map[string]interface{}{
+			"account_id": accountID,
+			"region":     opts.Region,
+		})
+		return nil, fmt.Errorf("failed to describe instances: %w", err)
 	}
 
+	// Log scan completion with metrics
+	scanDuration := time.Since(startTime)
 	logging.Info("Completed EC2 instance scan", map[string]interface{}{
-		"scanner":         s.Label(),
-		"region":          opts.Region,
-		"account_id":      accountID,
-		"instances_found": len(results),
+		"account_id":         accountID,
+		"region":            opts.Region,
+		"total_instances":   totalInstances,
+		"unused_instances":  len(results),
+		"cost_calculations": costCalculations,
+		"duration_ms":       scanDuration.Milliseconds(),
 	})
 
 	return results, nil
