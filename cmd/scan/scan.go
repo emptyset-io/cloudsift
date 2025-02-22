@@ -597,10 +597,19 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 			// Calculate scan metrics
 			duration := time.Since(startTime).Seconds()
+			poolMetrics := workerPool.GetMetrics()
 			metrics := html.ScanMetrics{
-				TotalScans:        totalScans,
-				TotalRunTime:      duration,
-				AvgScansPerSecond: float64(totalScans) / duration,
+				TotalScans:         totalScans,
+				CompletedScans:     poolMetrics.CompletedTasks,
+				FailedScans:        poolMetrics.FailedTasks,
+				TotalRunTime:       duration,
+				AvgScansPerSecond:  float64(poolMetrics.CompletedTasks) / duration,
+				CompletedAt:        time.Now(),
+				PeakWorkers:        poolMetrics.PeakWorkers,
+				MaxWorkers:         config.Config.MaxWorkers,
+				WorkerUtilization:  float64(poolMetrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
+				AvgExecutionTimeMs: poolMetrics.AverageExecutionMs,
+				TasksPerSecond:     float64(poolMetrics.CompletedTasks) / float64(poolMetrics.AverageExecutionMs) * 1000,
 			}
 
 			outputPath := "reports/scan_report.html"

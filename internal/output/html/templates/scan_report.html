@@ -170,12 +170,28 @@
                         </thead>
                         <tbody>
                             <tr>
-                                <td>Total Number of Scans</td>
+                                <td>Total Planned Scans</td>
                                 <td>{{ .ScanMetrics.TotalScans }}</td>
                             </tr>
                             <tr>
-                                <td>Average Scans per Second</td>
-                                <td>{{ printf "%.2f" .ScanMetrics.AvgScansPerSecond }}</td>
+                                <td>Completed Scans</td>
+                                <td>{{ .ScanMetrics.CompletedScans }}</td>
+                            </tr>
+                            <tr>
+                                <td>Failed Scans</td>
+                                <td>{{ .ScanMetrics.FailedScans }}</td>
+                            </tr>
+                            <tr>
+                                <td>Tasks per Second</td>
+                                <td>{{ printf "%.2f" .ScanMetrics.TasksPerSecond }}</td>
+                            </tr>
+                            <tr>
+                                <td>Average Task Time</td>
+                                <td>{{ .ScanMetrics.AvgExecutionTimeMs }}ms</td>
+                            </tr>
+                            <tr>
+                                <td>Worker Utilization</td>
+                                <td>{{ printf "%.1f%%" .ScanMetrics.WorkerUtilization }} ({{ .ScanMetrics.PeakWorkers }}/{{ .ScanMetrics.MaxWorkers }} workers)</td>
                             </tr>
                             <tr>
                                 <td>Total Run Time</td>

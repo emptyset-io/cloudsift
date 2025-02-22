@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"cloudsift/internal/config"
 )
 
 // TaskMetrics tracks performance metrics for a task
@@ -156,4 +158,31 @@ func (p *Pool) ExecuteTasks(tasks []Task) {
 	}
 	
 	p.Stop()
+}
+
+var (
+	// singleton instance of the pool
+	sharedPool *Pool
+	// mutex for safe initialization of the shared pool
+	initOnce sync.Once
+)
+
+// GetSharedPool returns the shared worker pool instance.
+// If the pool hasn't been initialized, it will be created using the MaxWorkers from global config.
+func GetSharedPool() *Pool {
+	initOnce.Do(func() {
+		sharedPool = NewPool(config.Config.MaxWorkers)
+		sharedPool.Start()
+	})
+	return sharedPool
+}
+
+// InitSharedPool initializes the shared worker pool with the specified number of workers.
+// This should be called early in the application lifecycle if you want to customize the pool size.
+// If the pool is already initialized, this call will be ignored.
+func InitSharedPool(maxWorkers int) {
+	initOnce.Do(func() {
+		sharedPool = NewPool(maxWorkers)
+		sharedPool.Start()
+	})
 }
