@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -162,6 +163,7 @@ type CostEstimator struct {
 	priceCache    map[string]float64
 	cacheLock     sync.RWMutex
 	saveLock      sync.Mutex
+	rateLimiter   *RateLimiter
 }
 
 // DefaultCostEstimator is the default cost estimator instance
@@ -191,7 +193,12 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 	}
 
 	// Create session in us-east-1 (required for pricing API)
-	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-1"), // Pricing API is only available in us-east-1
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	}
 
 	// Create pricing client with explicit config to ensure region is set
 	cfg := aws.NewConfig().WithRegion("us-east-1")
@@ -199,13 +206,11 @@ func NewCostEstimator(cacheFile string) (*CostEstimator, error) {
 		pricingClient: pricing.New(sess, cfg),
 		cacheFile:     cacheFile,
 		priceCache:    make(map[string]float64),
+		rateLimiter:   NewRateLimiter(nil), // Use default rate limit config
 	}
 
 	if err := ce.loadCache(); err != nil {
-		logging.Error("Failed to load cache", err, map[string]interface{}{
-			"cache_file": cacheFile,
-		})
-		return nil, fmt.Errorf("failed to load cache: %w", err)
+		logging.Error("Failed to load price cache", err, nil)
 	}
 
 	logging.Debug("Cost estimator initialized", map[string]interface{}{
@@ -848,6 +853,12 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 }
 
 func (ce *CostEstimator) getPriceFromAPI(filters []*pricing.Filter) (float64, error) {
+	// Wait for rate limiter
+	ctx := context.Background()
+	if err := ce.rateLimiter.Wait(ctx); err != nil {
+		return 0, fmt.Errorf("rate limiter interrupted: %w", err)
+	}
+
 	input := &pricing.GetProductsInput{
 		ServiceCode: aws.String("AWSElasticLoadBalancer"),
 		Filters:     filters,
@@ -855,8 +866,12 @@ func (ce *CostEstimator) getPriceFromAPI(filters []*pricing.Filter) (float64, er
 
 	result, err := ce.pricingClient.GetProducts(input)
 	if err != nil {
+		ce.rateLimiter.OnFailure()
 		return 0, fmt.Errorf("failed to get pricing: %w", err)
 	}
+
+	// Record successful API call
+	ce.rateLimiter.OnSuccess()
 
 	if len(result.PriceList) == 0 {
 		return 0, fmt.Errorf("no pricing information found")

@@ -43,6 +43,7 @@ type Pool struct {
 	cancel        context.CancelFunc
 	metrics       *PoolMetrics
 	activeWorkers int64
+	stopping      int32 // Using atomic for thread-safe access
 }
 
 // NewPool creates a new worker pool with the specified number of workers
@@ -67,29 +68,44 @@ func (p *Pool) Start() {
 
 // Stop stops the worker pool and waits for all tasks to complete
 func (p *Pool) Stop() {
+	// Mark pool as stopping
+	if !atomic.CompareAndSwapInt32(&p.stopping, 0, 1) {
+		return // Already stopping
+	}
+
+	// Signal workers to stop accepting new tasks
 	p.cancel()
-	close(p.tasks)
+
+	// Wait for all tasks to complete and workers to exit
 	p.wg.Wait()
+
+	// Close task channel after all workers have exited
+	close(p.tasks)
 }
 
-// GetMetrics returns a copy of the current pool metrics
+// GetMetrics returns the current metrics for the pool
 func (p *Pool) GetMetrics() PoolMetrics {
 	p.metrics.mu.RLock()
 	defer p.metrics.mu.RUnlock()
-	
+
 	metrics := *p.metrics
 	metrics.CurrentWorkers = atomic.LoadInt64(&p.activeWorkers)
-	
+
 	// Calculate average execution time
 	if p.metrics.CompletedTasks > 0 {
 		metrics.AverageExecutionMs = metrics.TotalExecutionMs / p.metrics.CompletedTasks
 	}
-	
+
 	return metrics
 }
 
-// Submit submits a task to be executed by the worker pool
+// Submit submits a task to the pool
 func (p *Pool) Submit(task Task) {
+	// Don't submit if pool is stopping
+	if atomic.LoadInt32(&p.stopping) == 1 {
+		return
+	}
+
 	atomic.AddInt64(&p.metrics.TotalTasks, 1)
 	select {
 	case p.tasks <- task:
@@ -101,10 +117,10 @@ func (p *Pool) Submit(task Task) {
 
 func (p *Pool) worker() {
 	defer p.wg.Done()
-	
+
 	atomic.AddInt64(&p.activeWorkers, 1)
 	defer atomic.AddInt64(&p.activeWorkers, -1)
-	
+
 	// Update peak workers count if needed
 	currentWorkers := atomic.LoadInt64(&p.activeWorkers)
 	for {
@@ -123,12 +139,19 @@ func (p *Pool) worker() {
 			if !ok {
 				return
 			}
-			
+
 			// Track task metrics
 			start := time.Now()
-			err := task(p.ctx)
+
+			// Create a child context for the task that is cancelled when either:
+			// 1. The pool is stopping (p.ctx is cancelled)
+			// 2. The task times out (30 second timeout)
+			taskCtx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+			err := task(taskCtx)
+			cancel()
+
 			executionMs := time.Since(start).Milliseconds()
-			
+
 			p.metrics.mu.Lock()
 			p.metrics.TotalExecutionMs += executionMs
 			if err != nil {
@@ -137,17 +160,37 @@ func (p *Pool) worker() {
 				atomic.AddInt64(&p.metrics.CompletedTasks, 1)
 			}
 			p.metrics.mu.Unlock()
-			
+
 		case <-p.ctx.Done():
-			return
+			// Finish any remaining task in our channel before exiting
+			for {
+				select {
+				case task, ok := <-p.tasks:
+					if !ok {
+						return
+					}
+					task(context.Background()) // Run remaining tasks with background context
+				default:
+					return
+				}
+			}
 		}
 	}
 }
 
+// WaitForTasks waits for all currently submitted tasks to complete without stopping the pool
+func (p *Pool) WaitForTasks() {
+	// Create a temporary task that will only complete after all other tasks are done
+	done := make(chan struct{})
+	p.Submit(func(ctx context.Context) error {
+		close(done)
+		return nil
+	})
+	<-done
+}
+
 // ExecuteTasks executes a slice of tasks concurrently using the worker pool
 func (p *Pool) ExecuteTasks(tasks []Task) {
-	p.Start()
-	
 	// Submit tasks with backpressure
 	for _, task := range tasks {
 		select {
@@ -157,8 +200,8 @@ func (p *Pool) ExecuteTasks(tasks []Task) {
 			p.Submit(task)
 		}
 	}
-	
-	p.Stop()
+
+	p.WaitForTasks()
 }
 
 var (
@@ -173,7 +216,7 @@ var (
 func GetSharedPool() *Pool {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
-	
+
 	if sharedPool == nil {
 		sharedPool = NewPool(config.Config.MaxWorkers)
 		sharedPool.Start()
