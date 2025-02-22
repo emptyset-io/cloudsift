@@ -402,6 +402,18 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	pool := worker.NewPool(config.Config.MaxWorkers)
 	pool.ExecuteTasks(tasks)
 
+	// Get worker pool metrics
+	metrics := pool.GetMetrics()
+	logging.Info("Worker pool metrics", map[string]interface{}{
+		"total_tasks":          metrics.TotalTasks,
+		"completed_tasks":      metrics.CompletedTasks,
+		"failed_tasks":         metrics.FailedTasks,
+		"peak_workers":         metrics.PeakWorkers,
+		"avg_execution_ms":     metrics.AverageExecutionMs,
+		"tasks_per_second":     float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000,
+		"worker_utilization":   float64(metrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
+	})
+
 	// Calculate total scans for metrics
 	totalScans := 0
 	for _, scanner := range scanners {
