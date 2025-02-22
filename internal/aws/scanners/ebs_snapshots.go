@@ -114,12 +114,18 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				}
 				volumeOutput, err := svc.DescribeVolumes(volumeInput)
 				if err != nil {
-					logging.Error("Failed to batch lookup volume types", err, map[string]interface{}{
+					// Don't treat this as an error - the volume might have been deleted
+					// Just log it as debug information
+					logging.Debug("Some volumes not found during batch lookup", map[string]interface{}{
 						"account_id": accountID,
 						"region":     opts.Region,
 						"batch_size": len(batch),
+						"error":      err.Error(),
 					})
-				} else {
+				}
+				
+				// Process any volumes we did find
+				if volumeOutput != nil {
 					for _, vol := range volumeOutput.Volumes {
 						volumeTypesCache[aws.StringValue(vol.VolumeId)] = aws.StringValue(vol.VolumeType)
 					}
