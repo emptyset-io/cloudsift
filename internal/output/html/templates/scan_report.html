@@ -191,7 +191,8 @@
         <section class="summary-block wide">
             <h3>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    <path d="M12 1v22"/>
+                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
                 </svg>
                 Combined Cost Breakdown
             </h3>
@@ -224,6 +225,28 @@
                             </td>
                         </tr>
                         {{ end }}
+                        <tr class="totals-row">
+                            <td><strong>Totals</strong></td>
+                            {{ $totalHourly := 0.0 }}
+                            {{ $totalDaily := 0.0 }}
+                            {{ $totalMonthly := 0.0 }}
+                            {{ $totalYearly := 0.0 }}
+                            {{ $totalLifetime := 0.0 }}
+                            {{ range $resourceType, $costs := .CombinedCosts }}
+                                {{ $totalHourly = add $totalHourly (index $costs "hourly_rate") }}
+                                {{ $totalDaily = add $totalDaily (index $costs "daily_rate") }}
+                                {{ $totalMonthly = add $totalMonthly (index $costs "monthly_rate") }}
+                                {{ $totalYearly = add $totalYearly (index $costs "yearly_rate") }}
+                                {{ if not (or (eq $resourceType "Elastic IPs") (eq $resourceType "Load Balancers")) }}
+                                    {{ $totalLifetime = add $totalLifetime (index $costs "lifetime") }}
+                                {{ end }}
+                            {{ end }}
+                            <td><strong>${{ formatHourlyCost $totalHourly }}</strong></td>
+                            <td><strong>${{ formatDailyCost $totalDaily }}</strong></td>
+                            <td><strong>${{ formatMonthlyCost $totalMonthly }}</strong></td>
+                            <td><strong>${{ formatYearlyCost $totalYearly }}</strong></td>
+                            <td><strong>${{ formatLifetimeCost $totalLifetime }}</strong></td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -233,59 +256,69 @@
         <section class="summary-block" id="unused-resources">
             <h3>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                    <line x1="12" y1="9" x2="12" y2="13"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                    <polyline points="13 2 13 9 20 9"/>
                 </svg>
                 Unused Resources
             </h3>
-            <div class="input-container">
-                <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-                <input type="text" id="search-input" placeholder="Search resources..." />
-                <button id="clear-search" onclick="clearSearch()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div class="search-container">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+
+                    <input type="text" id="search-input" placeholder="Search resources..." oninput="filterTable()">
+                    <button id="clear-search" class="btn" style="display: none;" onclick="clearSearch()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                        Clear
+                    </button>
+                </div>
+                <button class="btn" onclick="exportToCSV()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
-                    Clear
+                    Export CSV
                 </button>
             </div>
             <div class="table-wrapper">
                 <table id="scan-table">
                     <thead>
                         <tr>
+                            <th>Account ID <span class="sort-icon">↕</span></th>
+                            <th>Account Name <span class="sort-icon">↕</span></th>
                             <th>Resource Type <span class="sort-icon">↕</span></th>
+                            <th>Name <span class="sort-icon">↕</span></th>
                             <th>Resource ID <span class="sort-icon">↕</span></th>
                             <th>Region <span class="sort-icon">↕</span></th>
-                            <th>Account <span class="sort-icon">↕</span></th>
-                            <th>Last Used <span class="sort-icon">↕</span></th>
-                            <th>Details <span class="sort-icon">↕</span></th>
+                            <th>Reason <span class="sort-icon">↕</span></th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {{ range .Resources }}
                         <tr>
+                            <td>{{ .AccountID }}</td>
+                            <td>{{ .AccountName }}</td>
                             <td>{{ .ResourceType }}</td>
+                            <td>{{ .Name }}</td>
                             <td>{{ .ResourceID }}</td>
                             <td>{{ .Region }}</td>
-                            <td>{{ .AccountID }}</td>
                             <td>{{ .Reason }}</td>
                             <td>
-                                {{ if .Details }}
-                                <button class="toggle-button" onclick="showDetailsModal('{{ .ResourceID }}', '{{ .ResourceType }}', '{{ .Details }}')">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <line x1="12" y1="16" x2="12" y2="12"/>
-                                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                                <button class="btn" onclick="showDetailsModal({{ .DetailsJSON }})">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                     </svg>
-                                    Show Details
+                                    Details
                                 </button>
-                                {{ else }}
-                                No details available
-                                {{ end }}
                             </td>
                         </tr>
                         {{ end }}
@@ -295,30 +328,105 @@
         </section>
     </div>
 
+    <style>
+        /* Modal Styles */
+        #details-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: var(--secondary-bg);
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            width: 80%;
+            max-width: 800px;
+            position: relative;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .close-modal {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .close-modal:hover {
+            color: var(--accent);
+        }
+
+        .modal-content h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            padding-right: 40px;
+        }
+
+        .modal-content pre {
+            background-color: var(--primary-bg);
+            border-radius: var(--border-radius);
+            padding: 16px;
+            margin: 0;
+            overflow: auto;
+            max-height: 60vh;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+
     <!-- Modal -->
-    <div id="details-modal-overlay" class="modal-overlay"></div>
-    <div id="details-modal" class="modal">
+    <div id="details-modal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                        <line x1="16" y1="13" x2="8" y2="13"/>
-                        <line x1="16" y1="17" x2="8" y2="17"/>
-                        <polyline points="10 9 9 9 8 9"/>
-                    </svg>
-                    Resource Details
-                </h3>
-                <button class="modal-close" onclick="closeDetailsModal()">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
-            </div>
-            <pre id="modal-details"></pre>
+            <span class="close-modal">&times;</span>
+            <h2>Resource Details</h2>
+            <pre id="json-content"></pre>
         </div>
     </div>
+
+    <script>
+        function showDetailsModal(details) {
+            const modal = document.getElementById('details-modal');
+            const jsonContent = document.getElementById('json-content');
+            
+            // Format the JSON nicely
+            jsonContent.textContent = JSON.stringify(details, null, 2);
+            
+            modal.style.display = 'block';
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('details-modal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeModals = document.querySelectorAll('.close-modal');
+            closeModals.forEach(function(closeModal) {
+                closeModal.addEventListener('click', function() {
+                    const modal = document.getElementById('details-modal');
+                    modal.style.display = 'none';
+                });
+            });
+        });
+    </script>
 </body>
 </html>

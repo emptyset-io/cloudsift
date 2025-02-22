@@ -126,19 +126,18 @@ func (s *IAMRoleScanner) determineUnusedReasons(lastUsedTime *time.Time, attache
 
 	// Check for roles with no activity
 	if lastUsedTime == nil {
-		reasons = append(reasons, fmt.Sprintf("Role has never been used in the last %d days.", opts.DaysUnused))
+		reasons = append(reasons, "Role has never been used.")
 	} else {
 		lastUsedDate := aws.TimeValue(lastUsedTime)
 		age := time.Since(lastUsedDate)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Role has not been used in %d days (last used: %s).",
-				opts.DaysUnused, lastUsedDate.Format("2006-01-02")))
+			reasons = append(reasons, fmt.Sprintf("Role has not been used in %s.", ageString))
 		}
 	}
 
 	// Check for roles with no attached policies
 	if len(attachedPolicies) == 0 {
-		reasons = append(reasons, fmt.Sprintf("Role has no attached policies for %d days.", opts.DaysUnused))
+		reasons = append(reasons, "Role has no attached policies.")
 	}
 
 	return reasons

@@ -366,7 +366,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						if results[i].Details == nil {
 							results[i].Details = make(map[string]interface{})
 						}
-						results[i].Details["account_id"] = account.ID
+						results[i].AccountID = account.ID
+						results[i].AccountName = account.Name
 						// For IAM scanners, set region as "global", otherwise use actual region
 						if isIAMScanner(scanner) {
 							results[i].Details["region"] = "global"
