@@ -180,28 +180,45 @@ func (p *Pool) worker() {
 
 // WaitForTasks waits for all currently submitted tasks to complete without stopping the pool
 func (p *Pool) WaitForTasks() {
-	// Create a temporary task that will only complete after all other tasks are done
-	done := make(chan struct{})
+	// Create a WaitGroup to track all pending tasks
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Submit a marker task that will only complete after all previous tasks
 	p.Submit(func(ctx context.Context) error {
-		close(done)
+		wg.Done()
 		return nil
 	})
-	<-done
+
+	// Wait for all tasks to complete
+	wg.Wait()
 }
 
 // ExecuteTasks executes a slice of tasks concurrently using the worker pool
 func (p *Pool) ExecuteTasks(tasks []Task) {
-	// Submit tasks with backpressure
-	for _, task := range tasks {
+	// Create a WaitGroup to track all tasks
+	var wg sync.WaitGroup
+	wg.Add(len(tasks))
+
+	// Wrap each task to track completion
+	for _, t := range tasks {
+		task := t // Create new variable for closure
+		wrappedTask := func(ctx context.Context) error {
+			defer wg.Done()
+			return task(ctx)
+		}
+
+		// Submit tasks with backpressure
 		select {
 		case <-p.ctx.Done():
 			return // Pool is shutting down
 		default:
-			p.Submit(task)
+			p.Submit(wrappedTask)
 		}
 	}
 
-	p.WaitForTasks()
+	// Wait for all tasks to complete
+	wg.Wait()
 }
 
 var (
