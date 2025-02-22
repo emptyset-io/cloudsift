@@ -145,10 +145,10 @@ func WriteHTML(results []aws.ScanResult, outputPath string, metrics ScanMetrics)
 func processResults(results []aws.ScanResult) TemplateData {
 	data := TemplateData{
 		AccountsAndRegions: make(map[string][]string),
-		AccountNames:      make(map[string]string),
+		AccountNames:       make(map[string]string),
 		ResourceTypeCounts: make(map[string]int),
-		CombinedCosts:     make(map[string]map[string]interface{}),
-		Resources:         make([]Resource, 0),
+		CombinedCosts:      make(map[string]map[string]interface{}),
+		Resources:          make([]Resource, 0),
 		ScanMetrics: ScanMetrics{
 			TotalScans:        len(results),
 			AvgScansPerSecond: 0, // Will be set by caller
@@ -159,12 +159,24 @@ func processResults(results []aws.ScanResult) TemplateData {
 
 	// Process each result
 	for _, result := range results {
-		// Get account ID and name from top-level fields
-		accountID := result.AccountID
-		accountName := result.AccountName
-
-		// Get region from details
+		// Extract account ID and region
+		accountID := ""
+		accountName := ""
 		region := ""
+
+		// Try both camelCase and snake_case keys
+		if id, ok := result.Details["AccountId"].(string); ok {
+			accountID = id
+		} else if id, ok := result.Details["account_id"].(string); ok {
+			accountID = id
+		}
+
+		if name, ok := result.Details["AccountName"].(string); ok {
+			accountName = name
+		} else if name, ok := result.Details["account_name"].(string); ok {
+			accountName = name
+		}
+
 		if reg, ok := result.Details["Region"].(string); ok {
 			region = reg
 		} else if reg, ok := result.Details["region"].(string); ok {
@@ -250,7 +262,7 @@ func processResults(results []aws.ScanResult) TemplateData {
 		detailsJSON, err := json.Marshal(result.Details)
 		if err != nil {
 			logging.Debug("Error marshaling details to JSON", map[string]interface{}{
-				"error": err,
+				"error":   err,
 				"details": result.Details,
 			})
 			detailsJSON = []byte("{}")
@@ -259,12 +271,12 @@ func processResults(results []aws.ScanResult) TemplateData {
 		data.Resources = append(data.Resources, Resource{
 			AccountID:    accountID,
 			AccountName:  accountName,
-			Region:      region,
+			Region:       region,
 			ResourceType: result.ResourceType,
-			Name:        resourceName,
-			ResourceID:  resourceID,
-			Reason:      result.Reason,
-			DetailsJSON: template.JS(detailsJSON),
+			Name:         resourceName,
+			ResourceID:   resourceID,
+			Reason:       result.Reason,
+			DetailsJSON:  template.JS(detailsJSON),
 		})
 	}
 

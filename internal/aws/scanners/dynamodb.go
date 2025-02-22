@@ -199,42 +199,30 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 			opts)
 
 		if len(reasons) > 0 {
-			// Calculate cost
-			costConfig := awslib.ResourceCostConfig{
-				ResourceType: "DynamoDB",
-				ResourceSize: tableDesc.Table.TableSizeBytes,
-				Region:       opts.Region,
-				CreationTime: aws.TimeValue(tableDesc.Table.CreationDateTime),
-			}
-
-			cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig)
-			if err != nil {
-				logging.Error("Failed to calculate cost", err, map[string]interface{}{
-					"table_name": *tableName,
-				})
-			}
-
 			details := map[string]interface{}{
-				"ItemCount":        aws.Int64Value(tableDesc.Table.ItemCount),
-				"TableSizeBytes":   aws.Int64Value(tableDesc.Table.TableSizeBytes),
-				"ReadThroughput":   metrics["read_throughput"],
-				"WriteThroughput":  metrics["write_throughput"],
-				"ThrottledEvents":  metrics["throttled_events"],
-				"account_id":       accountID,
-				"region":           opts.Region,
-				"ProvisionedRead":  aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
-				"ProvisionedWrite": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits),
+				"ItemCount":      aws.Int64Value(tableDesc.Table.ItemCount),
+				"TableSizeBytes": aws.Int64Value(tableDesc.Table.TableSizeBytes),
+				"ReadThroughput": metrics["read_throughput"],
+				"WriteThroughput": metrics["write_throughput"],
+				"ThrottledEvents": metrics["throttled_events"],
+				"account_id":      accountID,
+				"region":          opts.Region,
 			}
 
-			// Safely handle BillingModeSummary which may be nil
+			// Add billing mode if available
 			if tableDesc.Table.BillingModeSummary != nil {
 				details["BillingMode"] = aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode)
 			} else {
-				details["BillingMode"] = "PROVISIONED" // Default billing mode if not specified
+				details["BillingMode"] = "PROVISIONED" // Default billing mode
 			}
 
-			if cost != nil {
-				details["Cost"] = cost
+			// Add provisioned throughput if available
+			if tableDesc.Table.ProvisionedThroughput != nil {
+				details["ProvisionedRead"] = aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits)
+				details["ProvisionedWrite"] = aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits)
+			} else {
+				details["ProvisionedRead"] = 0
+				details["ProvisionedWrite"] = 0
 			}
 
 			result := awslib.ScanResult{

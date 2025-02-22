@@ -236,22 +236,22 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 
 		if len(reasons) > 0 {
 			// Calculate cost
-			costConfig := awslib.ResourceCostConfig{
-				ResourceType:  "OpenSearch",
-				ResourceSize:  instanceType,
-				Region:        opts.Region,
-				CreationTime:  time.Now(), // OpenSearch API doesn't provide creation time
-				VolumeType:    volumeType,
-				StorageSize:   volumeSize,
-				InstanceCount: instanceCount,
-			}
+			// costConfig := awslib.ResourceCostConfig{
+			// 	ResourceType:  "OpenSearch",
+			// 	ResourceSize:  instanceType,
+			// 	Region:        opts.Region,
+			// 	CreationTime:  time.Now(), // OpenSearch API doesn't provide creation time
+			// 	VolumeType:    volumeType,
+			// 	StorageSize:   volumeSize,
+			// 	InstanceCount: instanceCount,
+			// }
 
-			cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig)
-			if err != nil {
-				logging.Error("Failed to calculate cost", err, map[string]interface{}{
-					"domain_name": domainName,
-				})
-			}
+			// cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig)
+			// if err != nil {
+			// 	logging.Error("Failed to calculate cost", err, map[string]interface{}{
+			// 		"domain_name": domainName,
+			// 	})
+			// }
 
 			details := map[string]interface{}{
 				"InstanceType":   instanceType,
@@ -267,9 +267,9 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				"Region":         opts.Region,
 			}
 
-			if cost != nil {
-				details["Cost"] = cost
-			}
+			// if cost != nil {
+			// 	details["Cost"] = cost
+			// }
 
 			result := awslib.ScanResult{
 				ResourceType: s.Label(),

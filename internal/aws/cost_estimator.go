@@ -670,13 +670,59 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		ce.cacheLock.Unlock()
 
 		return totalCost, nil
+	case "RDS":
+		// Extract instance class from resource size string
+		instanceClass, ok := config.ResourceSize.(string)
+		if !ok {
+			return 0, fmt.Errorf("invalid resource size type for RDS: %T", config.ResourceSize)
+		}
+
+		filters = []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonRDS"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("instanceType"),
+				Value: aws.String(instanceClass),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("deploymentOption"),
+				Value: aws.String("Single-AZ"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("databaseEngine"),
+				Value: aws.String("MySQL"), // Default to MySQL pricing
+			},
+		}
+
+		price, err := ce.getPriceFromAPI(filters)
+		if err != nil {
+			logging.Error("Failed to get RDS instance price", err, map[string]interface{}{
+				"instance_class": instanceClass,
+				"region":        region,
+			})
+			// Fallback to default rate if pricing API fails
+			price = 0.005
+		}
+
+		ce.cacheLock.Lock()
+		ce.priceCache[cacheKey] = price
+		ce.cacheLock.Unlock()
+
+		return price, nil
 	case "ElasticIP":
 		// Elastic IPs have a flat rate of $0.005 per hour when not attached
 		hourlyRate := roundCost(0.005) // $0.005 per hour
-		return hourlyRate, nil
-	case "RDS":
-		// RDS has a flat rate of $0.005 per hour when not attached
-		hourlyRate := 0.005 // $0.005 per hour
 		return hourlyRate, nil
 	default:
 		cacheKey = fmt.Sprintf("%s:%s", resourceType, region)
@@ -977,6 +1023,21 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 		}, nil
 	case "OpenSearch":
 		// For OpenSearch, price is already per hour
+		hourlyPrice = pricePerUnit
+		dailyPrice := hourlyPrice * 24
+		monthlyPrice := dailyPrice * 30 // Approximate
+		yearlyPrice := dailyPrice * 365
+
+		return &CostBreakdown{
+			HourlyRate:   roundCost(hourlyPrice),
+			DailyRate:    roundCost(dailyPrice),
+			MonthlyRate:  roundCost(monthlyPrice),
+			YearlyRate:   roundCost(yearlyPrice),
+			HoursRunning: nil, // Hours running should be stored in details
+			Lifetime:     nil, // Lifetime will be calculated by the application
+		}, nil
+	case "RDS":
+		// For RDS, price is already per hour
 		hourlyPrice = pricePerUnit
 		dailyPrice := hourlyPrice * 24
 		monthlyPrice := dailyPrice * 30 // Approximate

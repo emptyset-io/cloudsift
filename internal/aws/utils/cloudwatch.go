@@ -102,10 +102,18 @@ func GetResourceMetricsData(cwClient *cloudwatch.CloudWatch, configs []MetricCon
 	for i, metricResult := range output.MetricDataResults {
 		if len(metricResult.Values) > 0 {
 			var sum float64
+			var validValues int
 			for _, value := range metricResult.Values {
-				sum += *value
+				if value != nil {
+					sum += *value
+					validValues++
+				}
 			}
-			results[configs[i].MetricName] = sum / float64(len(metricResult.Values))
+			if validValues > 0 {
+				results[configs[i].MetricName] = sum / float64(validValues)
+			} else {
+				results[configs[i].MetricName] = 0
+			}
 		} else {
 			results[configs[i].MetricName] = 0
 		}

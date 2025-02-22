@@ -75,29 +75,10 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
 
 	for _, instance := range instances {
-		// Skip if instance is nil
-		if instance == nil {
-			logging.Debug("Skipping nil RDS instance", nil)
-			continue
-		}
-
 		instanceID := aws.StringValue(instance.DBInstanceIdentifier)
-		if instanceID == "" {
-			logging.Debug("Skipping RDS instance with empty identifier", nil)
-			continue
-		}
-
 		logging.Debug("Analyzing RDS instance", map[string]interface{}{
 			"instance_id": instanceID,
 		})
-
-		// Skip if creation time is nil
-		if instance.InstanceCreateTime == nil {
-			logging.Debug("Skipping RDS instance with nil creation time", map[string]interface{}{
-				"instance_id": instanceID,
-			})
-			continue
-		}
 
 		// Calculate hours running
 		hoursRunning := endTime.Sub(aws.TimeValue(instance.InstanceCreateTime)).Hours()
@@ -112,21 +93,6 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		}
 
 		if len(reasons) > 0 {
-			// Calculate cost
-			costConfig := awslib.ResourceCostConfig{
-				ResourceType: "RDS",
-				ResourceSize: aws.StringValue(instance.DBInstanceClass),
-				Region:       opts.Region,
-				CreationTime: aws.TimeValue(instance.InstanceCreateTime),
-			}
-
-			cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig)
-			if err != nil {
-				logging.Error("Failed to calculate cost", err, map[string]interface{}{
-					"instance_id": instanceID,
-				})
-			}
-
 			// Create details map with comprehensive RDS instance information
 			details := map[string]interface{}{
 				"InstanceClass":      aws.StringValue(instance.DBInstanceClass),
@@ -161,23 +127,35 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				}
 			}
 
-			// Convert cost breakdown to map
-			costMap := map[string]interface{}{
-				"hourly_rate":   cost.HourlyRate,
-				"daily_rate":    cost.DailyRate,
-				"monthly_rate":  cost.MonthlyRate,
-				"yearly_rate":   cost.YearlyRate,
-				"hours_running": cost.HoursRunning,
-				"lifetime":      cost.Lifetime,
-			}
-
 			result := awslib.ScanResult{
 				ResourceType: s.Label(),
 				ResourceName: instanceID,
 				ResourceID:   aws.StringValue(instance.DBInstanceArn),
 				Reason:       strings.Join(reasons, ", "),
 				Details:      details,
-				Cost:         costMap,
+			}
+
+			// // Calculate cost
+			costConfig := awslib.ResourceCostConfig{
+				ResourceType: "RDS",
+				ResourceSize: aws.StringValue(instance.DBInstanceClass),
+				Region:       opts.Region,
+				CreationTime: aws.TimeValue(instance.InstanceCreateTime),
+			}
+
+			if cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig); err != nil {
+				logging.Error("Failed to calculate cost", err, map[string]interface{}{
+					"instance_id": instanceID,
+				})
+			} else if cost != nil {
+				result.Cost = map[string]interface{}{
+					"hourly_rate":   cost.HourlyRate,
+					"daily_rate":    cost.DailyRate,
+					"monthly_rate":  cost.MonthlyRate,
+					"yearly_rate":   cost.YearlyRate,
+					"hours_running": cost.HoursRunning,
+					"lifetime":      cost.Lifetime,
+				}
 			}
 
 			results = append(results, result)
