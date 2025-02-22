@@ -205,8 +205,10 @@ func (ce *CostEstimator) saveCache() error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Marshal cache data
+	// Lock the cache while marshaling to prevent concurrent modifications
+	ce.cacheLock.RLock()
 	data, err := json.MarshalIndent(ce.priceCache, "", "  ")
+	ce.cacheLock.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache data: %w", err)
 	}

@@ -17,6 +17,7 @@ type MetricConfig struct {
 	Statistic     string
 	StartTime     time.Time
 	EndTime       time.Time
+	Period        int64
 }
 
 // GetResourceMetrics retrieves CloudWatch metrics for a resource using GetMetricStatistics
@@ -26,7 +27,7 @@ func GetResourceMetrics(cwClient *cloudwatch.CloudWatch, config MetricConfig) (f
 		MetricName: aws.String(config.MetricName),
 		StartTime:  aws.Time(config.StartTime),
 		EndTime:    aws.Time(config.EndTime),
-		Period:    aws.Int64(3600), // 1 hour
+		Period:     aws.Int64(config.Period),
 		Statistics: []*string{
 			aws.String(config.Statistic),
 		},

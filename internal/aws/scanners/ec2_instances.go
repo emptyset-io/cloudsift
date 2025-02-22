@@ -385,37 +385,40 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 							"source_dest_check":  aws.BoolValue(instance.SourceDestCheck),
 							"state":              aws.StringValue(instance.State.Name),
 							"state_code":         aws.Int64Value(instance.State.Code),
-							"state_reason": func() string {
-								if instance.StateReason != nil {
-									return aws.StringValue(instance.StateReason.Message)
-								}
-								return ""
-							}(),
-							"subnet_id":           aws.StringValue(instance.SubnetId),
-							"vpc_id":              aws.StringValue(instance.VpcId),
-							"hours_running":       time.Since(*instance.LaunchTime).Hours(),
-							"ebs_optimized":       aws.BoolValue(instance.EbsOptimized),
-							"ena_support":         aws.BoolValue(instance.EnaSupport),
-							"hypervisor":          aws.StringValue(instance.Hypervisor),
+							"subnet_id":          aws.StringValue(instance.SubnetId),
+							"vpc_id":             aws.StringValue(instance.VpcId),
+							"hours_running":      time.Since(*instance.LaunchTime).Hours(),
+							"ebs_optimized":      aws.BoolValue(instance.EbsOptimized),
+							"ena_support":        aws.BoolValue(instance.EnaSupport),
+							"hypervisor":         aws.StringValue(instance.Hypervisor),
 							"virtualization_type": aws.StringValue(instance.VirtualizationType),
-							"monitoring_state": func() string {
-								if instance.Monitoring != nil {
-									return aws.StringValue(instance.Monitoring.State)
-								}
-								return ""
-							}(),
-							"placement": func() map[string]interface{} {
-								if instance.Placement == nil {
-									return map[string]interface{}{}
-								}
-								return map[string]interface{}{
-									"availability_zone": aws.StringValue(instance.Placement.AvailabilityZone),
-									"affinity":          aws.StringValue(instance.Placement.Affinity),
-									"group_name":        aws.StringValue(instance.Placement.GroupName),
-									"host_id":           aws.StringValue(instance.Placement.HostId),
-									"tenancy":           aws.StringValue(instance.Placement.Tenancy),
-								}
-							}(),
+						}
+
+						// Add state reason
+						if instance.StateReason != nil {
+							details["state_reason"] = aws.StringValue(instance.StateReason.Message)
+						} else {
+							details["state_reason"] = ""
+						}
+
+						// Add monitoring state
+						if instance.Monitoring != nil {
+							details["monitoring_state"] = aws.StringValue(instance.Monitoring.State)
+						} else {
+							details["monitoring_state"] = ""
+						}
+
+						// Add placement
+						if instance.Placement != nil {
+							details["placement"] = map[string]interface{}{
+								"availability_zone": aws.StringValue(instance.Placement.AvailabilityZone),
+								"affinity":         aws.StringValue(instance.Placement.Affinity),
+								"group_name":       aws.StringValue(instance.Placement.GroupName),
+								"host_id":          aws.StringValue(instance.Placement.HostId),
+								"tenancy":          aws.StringValue(instance.Placement.Tenancy),
+							}
+						} else {
+							details["placement"] = map[string]interface{}{}
 						}
 
 						// Add network interfaces
@@ -604,13 +607,57 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 							}
 
 							// Debug cost information
-							logging.Debug("Cost breakdown for instance", map[string]interface{}{
-								"instance_id":    aws.StringValue(instance.InstanceId),
-								"state":          instanceState,
-								"instance_costs": instanceCosts,
-								"ebs_costs":      ebsCosts,
-								"total_costs":    totalCosts,
-							})
+							costLogData := map[string]interface{}{
+								"instance_id": aws.StringValue(instance.InstanceId),
+								"state":       instanceState,
+							}
+
+							if instanceCosts != nil {
+								costLogData["instance_costs"] = map[string]interface{}{
+									"hourly_rate":  instanceCosts.HourlyRate,
+									"daily_rate":   instanceCosts.DailyRate,
+									"monthly_rate": instanceCosts.MonthlyRate,
+									"yearly_rate":  instanceCosts.YearlyRate,
+								}
+								if instanceCosts.Lifetime != nil {
+									costLogData["instance_costs"].(map[string]interface{})["lifetime"] = *instanceCosts.Lifetime
+								}
+								if instanceCosts.HoursRunning != nil {
+									costLogData["instance_costs"].(map[string]interface{})["hours_running"] = *instanceCosts.HoursRunning
+								}
+							}
+
+							if ebsCosts != nil {
+								costLogData["ebs_costs"] = map[string]interface{}{
+									"hourly_rate":  ebsCosts.HourlyRate,
+									"daily_rate":   ebsCosts.DailyRate,
+									"monthly_rate": ebsCosts.MonthlyRate,
+									"yearly_rate":  ebsCosts.YearlyRate,
+								}
+								if ebsCosts.Lifetime != nil {
+									costLogData["ebs_costs"].(map[string]interface{})["lifetime"] = *ebsCosts.Lifetime
+								}
+								if ebsCosts.HoursRunning != nil {
+									costLogData["ebs_costs"].(map[string]interface{})["hours_running"] = *ebsCosts.HoursRunning
+								}
+							}
+
+							if totalCosts != nil {
+								costLogData["total_costs"] = map[string]interface{}{
+									"hourly_rate":  totalCosts.HourlyRate,
+									"daily_rate":   totalCosts.DailyRate,
+									"monthly_rate": totalCosts.MonthlyRate,
+									"yearly_rate":  totalCosts.YearlyRate,
+								}
+								if totalCosts.Lifetime != nil {
+									costLogData["total_costs"].(map[string]interface{})["lifetime"] = *totalCosts.Lifetime
+								}
+								if totalCosts.HoursRunning != nil {
+									costLogData["total_costs"].(map[string]interface{})["hours_running"] = *totalCosts.HoursRunning
+								}
+							}
+
+							logging.Debug("Cost breakdown for instance", costLogData)
 						}
 
 						// Add costs to result

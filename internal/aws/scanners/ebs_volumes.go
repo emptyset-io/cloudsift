@@ -252,6 +252,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 func (s *EBSVolumeScanner) getVolumeMetrics(cwClient *cloudwatch.CloudWatch, volumeID string, startTime time.Time, endTime time.Time) (map[string]float64, error) {
 	metrics := make(map[string]float64)
+	period := int64(86400) // 1 day
 	metricConfigs := []utils.MetricConfig{
 		{
 			Namespace:     "AWS/EBS",
@@ -261,6 +262,7 @@ func (s *EBSVolumeScanner) getVolumeMetrics(cwClient *cloudwatch.CloudWatch, vol
 			Statistic:     "Average",
 			StartTime:     startTime,
 			EndTime:       endTime,
+			Period:        period,
 		},
 		{
 			Namespace:     "AWS/EBS",
@@ -270,6 +272,7 @@ func (s *EBSVolumeScanner) getVolumeMetrics(cwClient *cloudwatch.CloudWatch, vol
 			Statistic:     "Average",
 			StartTime:     startTime,
 			EndTime:       endTime,
+			Period:        period,
 		},
 		{
 			Namespace:     "AWS/EBS",
@@ -279,6 +282,7 @@ func (s *EBSVolumeScanner) getVolumeMetrics(cwClient *cloudwatch.CloudWatch, vol
 			Statistic:     "Average",
 			StartTime:     startTime,
 			EndTime:       endTime,
+			Period:        period,
 		},
 	}
 

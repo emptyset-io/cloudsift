@@ -222,9 +222,15 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 				"ThrottledEvents":  metrics["throttled_events"],
 				"account_id":       accountID,
 				"region":           opts.Region,
-				"BillingMode":      aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode),
 				"ProvisionedRead":  aws.Int64Value(tableDesc.Table.ProvisionedThroughput.ReadCapacityUnits),
 				"ProvisionedWrite": aws.Int64Value(tableDesc.Table.ProvisionedThroughput.WriteCapacityUnits),
+			}
+
+			// Safely handle BillingModeSummary which may be nil
+			if tableDesc.Table.BillingModeSummary != nil {
+				details["BillingMode"] = aws.StringValue(tableDesc.Table.BillingModeSummary.BillingMode)
+			} else {
+				details["BillingMode"] = "PROVISIONED" // Default billing mode if not specified
 			}
 
 			if cost != nil {
