@@ -75,10 +75,29 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
 
 	for _, instance := range instances {
+		// Skip if instance is nil
+		if instance == nil {
+			logging.Debug("Skipping nil RDS instance", nil)
+			continue
+		}
+
 		instanceID := aws.StringValue(instance.DBInstanceIdentifier)
+		if instanceID == "" {
+			logging.Debug("Skipping RDS instance with empty identifier", nil)
+			continue
+		}
+
 		logging.Debug("Analyzing RDS instance", map[string]interface{}{
 			"instance_id": instanceID,
 		})
+
+		// Skip if creation time is nil
+		if instance.InstanceCreateTime == nil {
+			logging.Debug("Skipping RDS instance with nil creation time", map[string]interface{}{
+				"instance_id": instanceID,
+			})
+			continue
+		}
 
 		// Calculate hours running
 		hoursRunning := endTime.Sub(aws.TimeValue(instance.InstanceCreateTime)).Hours()
