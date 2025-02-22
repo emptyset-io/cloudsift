@@ -18,14 +18,14 @@ type TaskMetrics struct {
 
 // PoolMetrics provides metrics about the worker pool's performance
 type PoolMetrics struct {
-	TotalTasks        int64
-	CompletedTasks    int64
-	FailedTasks       int64
-	CurrentWorkers    int64
-	PeakWorkers       int64
+	TotalTasks         int64
+	CompletedTasks     int64
+	FailedTasks        int64
+	CurrentWorkers     int64
+	PeakWorkers        int64
 	AverageExecutionMs int64
-	Metrics           []TaskMetrics
-	mu               sync.RWMutex
+	TotalExecutionMs   int64
+	mu                 sync.RWMutex
 }
 
 // Task represents a unit of work to be executed
@@ -47,12 +47,10 @@ func NewPool(maxWorkers int) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Pool{
 		maxWorkers: maxWorkers,
-		tasks:      make(chan Task),
+		tasks:      make(chan Task, maxWorkers*2), // Buffer the channel to prevent blocking
 		ctx:        ctx,
 		cancel:     cancel,
-		metrics: &PoolMetrics{
-			Metrics: make([]TaskMetrics, 0),
-		},
+		metrics:    &PoolMetrics{},
 	}
 }
 
@@ -81,11 +79,7 @@ func (p *Pool) GetMetrics() PoolMetrics {
 	
 	// Calculate average execution time
 	if p.metrics.CompletedTasks > 0 {
-		var totalMs int64
-		for _, m := range p.metrics.Metrics {
-			totalMs += m.ExecutionMs
-		}
-		metrics.AverageExecutionMs = totalMs / p.metrics.CompletedTasks
+		metrics.AverageExecutionMs = metrics.TotalExecutionMs / p.metrics.CompletedTasks
 	}
 	
 	return metrics
@@ -94,7 +88,12 @@ func (p *Pool) GetMetrics() PoolMetrics {
 // Submit submits a task to be executed by the worker pool
 func (p *Pool) Submit(task Task) {
 	atomic.AddInt64(&p.metrics.TotalTasks, 1)
-	p.tasks <- task
+	select {
+	case p.tasks <- task:
+		// Task submitted successfully
+	case <-p.ctx.Done():
+		// Pool is shutting down
+	}
 }
 
 func (p *Pool) worker() {
@@ -127,15 +126,8 @@ func (p *Pool) worker() {
 			err := task(p.ctx)
 			executionMs := time.Since(start).Milliseconds()
 			
-			metrics := TaskMetrics{
-				StartTime:    start,
-				EndTime:     time.Now(),
-				ExecutionMs: executionMs,
-				ErrorOccured: err != nil,
-			}
-			
 			p.metrics.mu.Lock()
-			p.metrics.Metrics = append(p.metrics.Metrics, metrics)
+			p.metrics.TotalExecutionMs += executionMs
 			if err != nil {
 				atomic.AddInt64(&p.metrics.FailedTasks, 1)
 			} else {
@@ -152,8 +144,16 @@ func (p *Pool) worker() {
 // ExecuteTasks executes a slice of tasks concurrently using the worker pool
 func (p *Pool) ExecuteTasks(tasks []Task) {
 	p.Start()
+	
+	// Submit tasks with backpressure
 	for _, task := range tasks {
-		p.Submit(task)
+		select {
+		case <-p.ctx.Done():
+			return // Pool is shutting down
+		default:
+			p.Submit(task)
+		}
 	}
+	
 	p.Stop()
 }

@@ -22,6 +22,6 @@ type GlobalConfig struct {
 
 // Config is the global configuration instance
 var Config = &GlobalConfig{
-	Profile:    "default", // Default to "default" profile
-	MaxWorkers: runtime.NumCPU() * 4, // Default to 4x CPU cores since tasks are I/O bound
+	Profile:    "default",            // Default to "default" profile
+	MaxWorkers: runtime.NumCPU() * 8, // Default to 4x CPU cores since tasks are I/O bound
 }

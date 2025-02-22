@@ -382,6 +382,9 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var resultsMutex sync.Mutex
 	progressMap := newScannerProgressMap()
 
+	// Create worker pool
+	workerPool := worker.NewPool(config.Config.MaxWorkers)
+
 	// Start progress logger
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -400,8 +403,16 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 					// Only emit progress if no logs in the last tick interval
 					lastLog := logging.GetLastLogTime()
 					if time.Since(lastLog) >= tickDuration {
-						// Log header
-						logging.Progress("Pending Scanners:", nil)
+						// Get worker pool metrics
+						metrics := workerPool.GetMetrics()
+						activeWorkers := metrics.CurrentWorkers
+						maxWorkers := int64(config.Config.MaxWorkers)
+						freeWorkers := maxWorkers - activeWorkers
+						utilization := float64(activeWorkers) / float64(maxWorkers) * 100
+
+						// Log header with detailed worker stats
+						logging.Progress(fmt.Sprintf("Pending Scanners (Workers: %d active (%d%% utilized), %d idle of %d total):", 
+							activeWorkers, int(utilization), freeWorkers, maxWorkers), nil)
 
 						// Sort scanners by account ID and scanner name for consistent output
 						sort.Slice(running, func(i, j int) bool {
@@ -424,6 +435,18 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 								prog.AccountID,
 								region,
 								prog.ResultCount,
+							), nil)
+						}
+
+						// Log completion stats if any tasks have completed
+						if metrics.CompletedTasks > 0 {
+							avgExecMs := metrics.AverageExecutionMs
+							tasksPerSec := float64(metrics.CompletedTasks) / (float64(metrics.TotalExecutionMs) / 1000.0)
+							logging.Progress(fmt.Sprintf("  Stats: %d completed, %d failed, %.1f tasks/sec, avg %.1fs per task", 
+								metrics.CompletedTasks,
+								metrics.FailedTasks,
+								tasksPerSec,
+								float64(avgExecMs)/1000.0,
 							), nil)
 						}
 					}
@@ -515,12 +538,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	// Create and run worker pool
-	pool := worker.NewPool(config.Config.MaxWorkers)
-	pool.ExecuteTasks(tasks)
+	// Execute tasks using the worker pool
+	workerPool.ExecuteTasks(tasks)
 
 	// Get worker pool metrics
-	metrics := pool.GetMetrics()
+	metrics := workerPool.GetMetrics()
 	logging.Info("Worker pool metrics", map[string]interface{}{
 		"total_tasks":        metrics.TotalTasks,
 		"completed_tasks":    metrics.CompletedTasks,
