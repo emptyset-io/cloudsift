@@ -860,8 +860,17 @@ func (ce *CostEstimator) getPriceFromAPI(filters []*pricing.Filter) (float64, er
 		return 0, fmt.Errorf("rate limiter interrupted: %w", err)
 	}
 
+	// Find the service code from filters
+	serviceCode := "AmazonEC2" // default to EC2
+	for _, filter := range filters {
+		if aws.StringValue(filter.Field) == "servicecode" {
+			serviceCode = aws.StringValue(filter.Value)
+			break
+		}
+	}
+
 	input := &pricing.GetProductsInput{
-		ServiceCode: aws.String("AWSElasticLoadBalancer"),
+		ServiceCode: aws.String(serviceCode),
 		Filters:     filters,
 	}
 
