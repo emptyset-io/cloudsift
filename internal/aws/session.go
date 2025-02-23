@@ -52,9 +52,9 @@ func GetSession(role string, region ...string) (*session.Session, error) {
 func GetSessionChain(organizationRole, scannerRole string, targetAccountID string, region string) (*session.Session, error) {
 	logging.Debug("Creating AWS session chain", map[string]interface{}{
 		"organization_role": organizationRole,
-		"scanner_role":     scannerRole,
-		"target_account":   targetAccountID,
-		"region":           region,
+		"scanner_role":      scannerRole,
+		"target_account":    targetAccountID,
+		"region":            region,
 	})
 
 	// Create base session with region
@@ -76,7 +76,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 	}
 	logging.Info("Created base session", map[string]interface{}{
 		"account_id": *baseIdentity.Account,
-		"arn":       *baseIdentity.Arn,
+		"arn":        *baseIdentity.Arn,
 	})
 
 	currentSession := baseSession
@@ -100,7 +100,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify organization role assumption: %w", err)
 		}
-		logging.Info("Assumed organization role", map[string]interface{}{
+		logging.Debug("Assumed organization role", map[string]interface{}{
 			"role_arn": *orgIdentity.Arn,
 		})
 
@@ -129,7 +129,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 			if err != nil {
 				return nil, fmt.Errorf("failed to verify scanner role assumption: %w", err)
 			}
-			logging.Info("Assumed scanner role in target account", map[string]interface{}{
+			logging.Debug("Assumed scanner role in target account", map[string]interface{}{
 				"role_arn":       *scannerIdentity.Arn,
 				"target_account": targetAccountID,
 			})
@@ -156,7 +156,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 			if err != nil {
 				return nil, fmt.Errorf("failed to verify scanner role assumption: %w", err)
 			}
-			logging.Info("Assumed scanner role in current account", map[string]interface{}{
+			logging.Debug("Assumed scanner role in current account", map[string]interface{}{
 				"role_arn": *scannerIdentity.Arn,
 			})
 
@@ -194,7 +194,7 @@ func AssumeRole(targetAccountID, roleName string, sess *session.Session) (*sessi
 
 	logging.Debug("Attempting cross-account role assumption", map[string]interface{}{
 		"target_account": targetAccountID,
-		"role":          roleName,
+		"role":           roleName,
 	})
 
 	// Construct role ARN for target account
@@ -213,7 +213,7 @@ func AssumeRole(targetAccountID, roleName string, sess *session.Session) (*sessi
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify cross-account role assumption: %w", err)
 	}
-	logging.Info("Assumed cross-account role", map[string]interface{}{
+	logging.Debug("Assumed cross-account role", map[string]interface{}{
 		"role_arn": *identity.Arn,
 	})
 
