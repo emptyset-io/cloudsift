@@ -69,6 +69,10 @@ func convertToScanResults(data *SampleData) []aws.ScanResult {
 	for _, res := range data.UnusedResources {
 		// Use the details directly from the JSON
 		details := res.Details
+		if details == nil {
+			details = make(map[string]interface{})
+		}
+		details["Region"] = res.Region
 
 		// Get the first reason if available, otherwise use a default
 		reason := "No reason provided"
@@ -99,8 +103,8 @@ func convertToScanResults(data *SampleData) []aws.ScanResult {
 			ResourceID:   res.ID,
 			AccountID:    res.AccountID,
 			AccountName:  res.AccountName,
-			Reason:       reason,
 			Details:      details,
+			Reason:       reason,
 		}
 		results = append(results, result)
 	}

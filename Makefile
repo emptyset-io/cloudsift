@@ -81,5 +81,10 @@ release: lint test build-all
 	gh release create v$(GH_VERSION) bin/* --title "Release $(GH_VERSION)" --notes "Automated release for version $(GH_VERSION)"
 	@echo "Release v$(GH_VERSION) created successfully."
 
-
-
+.PHONY: example-report
+example-report:
+	@echo "Generating sample JSON data..."
+	@go run examples/generate_json_sample.go
+	@echo "Generating HTML report..."
+	@go run examples/generate_html_report.go
+	@echo "Report generated at examples/output/sample_report.html"
