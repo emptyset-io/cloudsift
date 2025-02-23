@@ -268,7 +268,7 @@ The scanner role requires the AWS-managed `ReadOnlyAccess` policy and the follow
 ```
 
 ##### Optional S3 Permissions  
-If you want to enable S3-based file output, the scanner role must also have permissions to read and write to an S3 bucket. The following policy grants the necessary access to `<bucket_name>`:
+If you want to enable S3-based file output, the organization role must also have permissions to read and write to an S3 bucket. The following policy grants the necessary access to `<bucket_name>`:
 
 ```json
 {
