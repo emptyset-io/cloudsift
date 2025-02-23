@@ -5,7 +5,13 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
 ## Key Features
 
 - **Multi-Account & Region Scanning**: Seamlessly scan multiple AWS organizations and regions to identify unused resources
-- **Cost Analysis**: Get detailed cost breakdowns for unused resources to understand potential savings
+- **Real-Time Cost Analysis**: 
+  - Live cost estimation using AWS Pricing API
+  - Smart caching system to reduce API calls and improve performance
+  - Detailed cost breakdowns for all resource types
+  - Hourly, daily, monthly, and yearly cost projections
+  - Resource lifetime cost calculations
+  - Support for all AWS regions and pricing tiers
 - **Resource Discovery**: Comprehensive scanning of various AWS services:
   - EC2 Instances
     - CPU and memory utilization analysis
@@ -74,6 +80,44 @@ You can view an example of a CloudSift report [here](https://emptyset-io.github.
 - Usage patterns and recommendations
 
 Note: This example uses generated sample data and does not reflect real AWS resources or costs. It is intended to demonstrate the report format and features only.
+
+## Cost Estimation
+
+CloudSift includes a sophisticated cost estimation system that provides real-time cost analysis for AWS resources:
+
+### Features
+
+- **Live AWS Pricing**: Uses the AWS Pricing API to get current pricing information for all resource types
+- **Intelligent Caching**: 
+  - Caches pricing data locally to minimize API calls
+  - Automatically refreshes stale cache entries
+  - Persists across runs to maintain performance
+- **Comprehensive Coverage**:
+  - Supports all AWS regions and their specific pricing
+  - Handles complex pricing models (e.g., EC2 instance types, EBS volume types)
+  - Accounts for regional price variations
+- **Cost Breakdowns**:
+  - Hourly rates
+  - Daily projections
+  - Monthly estimates
+  - Yearly forecasts
+  - Lifetime costs based on resource creation time
+- **Resource-Specific Calculations**:
+  - EC2: Instance type and region-specific pricing
+  - EBS: Volume type, size, and IOPS
+  - RDS: Instance class and storage calculations
+  - ELB: Load balancer type and data processing
+  - DynamoDB: Provisioned capacity and storage
+  - OpenSearch: Instance count and storage size
+
+### Cache Management
+
+The cost estimator maintains a local cache at `cache/costs.json` to optimize performance:
+
+- Automatically creates and manages the cache directory
+- Thread-safe cache access for concurrent operations
+- Graceful handling of cache misses
+- Periodic cache updates to maintain accuracy
 
 ## Prerequisites
 
