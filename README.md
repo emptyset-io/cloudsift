@@ -134,7 +134,24 @@ CloudSift includes a sophisticated real-time cost analysis system:
 1. **AWS Credentials**:  
    Configure your AWS credentials using `aws configure` or set up the `~/.aws/credentials` file.
 
-2. **Required Roles** (for multi-account scanning):  
+2. **Deploy Required Infrastructure**:  
+   Before using CloudSift, you must deploy the required AWS infrastructure (IAM roles and S3 bucket) using our CloudFormation template. 
+   
+   ⚠️ **Important**: Deploy this template in your AWS Organization's management account.
+
+   [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?#/stacks/new?templateURL=https://cloudsift-public.s3.us-east-2.amazonaws.com/deployment-v1/aws/cloudsift-aws-standard-org.json&stackName=cloudsift)
+
+   This template will create:
+   - Organization Role: For querying organization-level resources
+   - Scanner Role: For reading resources in member accounts
+   - S3 Bucket: For storing scan results with server-side encryption
+   
+   After deployment, note the following outputs from the CloudFormation stack:
+   - `OrganizationRoleArn`: Use this as the `--organization-role` parameter
+   - `ScannerRoleArn`: Use this as the `--scanner-role` parameter
+   - `BucketName`: Use this as the `--bucket` parameter
+
+3. **Required Roles** (for multi-account scanning):  
    - **Organization Role**: IAM role for querying organization-level resources.  
    - **Scanner Role**: IAM role in each account with read-only access to AWS resources.  
 
