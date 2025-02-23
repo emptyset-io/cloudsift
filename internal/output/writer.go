@@ -14,7 +14,10 @@ import (
 	awsutil "cloudsift/internal/aws"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -49,13 +52,14 @@ const (
 
 // Config holds output configuration
 type Config struct {
-	Type      Type
-	S3Bucket  string
-	S3Region  string
-	OutputDir string
-	Retry     *RetryConfig
-	Upload    *UploadConfig
-	Region    string
+	Type            Type
+	S3Bucket        string
+	S3Region        string
+	OutputDir       string
+	Retry           *RetryConfig
+	Upload          *UploadConfig
+	Region          string
+	OrganizationRole string // Role to assume for S3 operations
 }
 
 // Writer handles writing scan results to different destinations
@@ -199,55 +203,105 @@ func (w *Writer) writeToS3WithRetry(path string, data []byte) error {
 		w.config.Retry.MaxRetries, lastErr)
 }
 
+// getRoleARN returns the full ARN for a role. If the input is already an ARN, returns it as is.
+func getRoleARN(sess *session.Session, roleName string) (string, error) {
+	// If it's already an ARN, return it
+	if strings.HasPrefix(roleName, "arn:aws:iam::") {
+		return roleName, nil
+	}
+
+	// Get the account ID using STS
+	stsClient := sts.New(sess)
+	result, err := stsClient.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	// Construct the role ARN
+	return fmt.Sprintf("arn:aws:iam::%s:role/%s", *result.Account, roleName), nil
+}
+
 // writeToS3 writes data to an S3 bucket with progress tracking
 func (w *Writer) writeToS3(path string, data []byte) error {
-	// Get AWS session with bucket region for S3 operations
+	// Create base session
 	sess, err := awsutil.GetSession("", w.config.S3Region)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
-	// Configure uploader with parallel upload settings
+	// If organization role is specified, assume it
+	if w.config.OrganizationRole != "" {
+		// Get full role ARN
+		roleARN, err := getRoleARN(sess, w.config.OrganizationRole)
+		if err != nil {
+			return fmt.Errorf("failed to get role ARN: %w", err)
+		}
+
+		// Create STS client
+		stsClient := sts.New(sess)
+
+		// Create assume role input
+		roleSessionName := fmt.Sprintf("cloudsift-upload-%d", time.Now().Unix())
+		input := &sts.AssumeRoleInput{
+			RoleArn:         aws.String(roleARN),
+			RoleSessionName: aws.String(roleSessionName),
+		}
+
+		// Assume the role
+		result, err := stsClient.AssumeRole(input)
+		if err != nil {
+			return fmt.Errorf("failed to assume role: %w", err)
+		}
+
+		// Create new session with temporary credentials
+		sess, err = session.NewSession(&aws.Config{
+			Region: aws.String(w.config.S3Region),
+			Credentials: credentials.NewStaticCredentials(
+				*result.Credentials.AccessKeyId,
+				*result.Credentials.SecretAccessKey,
+				*result.Credentials.SessionToken,
+			),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create session with assumed role: %w", err)
+		}
+	}
+
+	// Create uploader
 	uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
 		u.PartSize = w.config.Upload.PartSize
 		u.Concurrency = w.config.Upload.ConcurrentParts
 	})
 
-	// Create a reader for the data
-	reader := bytes.NewReader(data)
-	size := reader.Len()
-
-	// Create progress bar
-	bar := progressbar.NewOptions(size,
-		progressbar.OptionSetDescription("Uploading"),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionShowCount(),
-	)
-
-	// Create a wrapped reader that updates progress
-	progressReader := &progressReader{
-		reader: reader,
-		size:   int64(size),
-		bar:    bar,
+	// Create progress reader
+	reader := &progressReader{
+		reader: bytes.NewReader(data),
+		size:   int64(len(data)),
+		bar: progressbar.NewOptions64(
+			int64(len(data)),
+			progressbar.OptionSetDescription("Uploading to S3..."),
+			progressbar.OptionShowBytes(true),
+			progressbar.OptionSetWidth(15),
+			progressbar.OptionThrottle(65*time.Millisecond),
+			progressbar.OptionShowCount(),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Println()
+			}),
+		),
 	}
 
-	// Upload with progress tracking
+	// Upload the file with server-side encryption
 	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(w.config.S3Bucket),
-		Key:    aws.String(path),
-		Body:   progressReader,
+		Bucket:               aws.String(w.config.S3Bucket),
+		Key:                 aws.String(path),
+		Body:                reader,
+		ServerSideEncryption: aws.String("aws:kms"),
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
-	if err := bar.Finish(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error finishing progress bar: %v\n", err)
-	}
-
-	fmt.Printf("\nSuccessfully uploaded %s\n", path)
 	return nil
 }
 
