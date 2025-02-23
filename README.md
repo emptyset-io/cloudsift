@@ -246,7 +246,7 @@ cloudsift scan --scanners ebs-volumes --regions us-west-2
 cloudsift scan --scanners ebs-volumes,ebs-snapshots \
                --regions us-west-2,us-east-1 \
                --organization-role OrganizationAccessRole \
-               --scanner-role SecurityAuditRole
+               --scanner-role ScannerAccessRole
 
 # Output HTML report to S3
 cloudsift scan --output s3 --output-format html \
