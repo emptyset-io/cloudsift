@@ -350,7 +350,7 @@ def calculate_resource_costs(resource_type, details):
 
     # Calculate yearly and lifetime costs
     costs["yearly"] = costs["monthly"] * 12
-    costs["lifetime"] = costs["yearly"] * random.randint(-2, 2)  # assume 3 year lifetime
+    costs["lifetime"] = costs["yearly"] * random.randint(-1, 3)  # assume 3 year lifetime
 
     return costs
 
