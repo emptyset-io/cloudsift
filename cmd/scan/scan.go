@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -616,8 +617,45 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			fmt.Printf("HTML report written to %s\n", outputPath)
 		}
 	case "s3":
-		// TODO: Implement S3 output
-		logging.Warn("S3 output not yet implemented", nil)
+		if opts.bucket == "" {
+			return fmt.Errorf("S3 bucket not specified. Use --bucket flag to specify the S3 bucket")
+		}
+
+		writer := output.NewWriter(output.Config{
+			Type:     output.S3,
+			S3Bucket: opts.bucket,
+			S3Region: opts.bucketRegion,
+		})
+
+		// Write results for each account
+		for accountID, result := range accountResults {
+			outputData := scanResult{
+				AccountID:   accountID,
+				AccountName: accounts[0].Name,
+				Results:     result.Results,
+			}
+
+			data, err := json.Marshal(outputData)
+			if err != nil {
+				logging.Error("Error marshaling scan results", err, map[string]interface{}{
+					"account_id": accountID,
+				})
+				continue
+			}
+
+			if err := writer.Write(accountID, data); err != nil {
+				logging.Error("Error writing scan results to S3", err, map[string]interface{}{
+					"account_id": accountID,
+					"bucket":     opts.bucket,
+				})
+				continue
+			}
+
+			logging.Info("Successfully wrote scan results to S3", map[string]interface{}{
+				"account_id": accountID,
+				"bucket":     opts.bucket,
+			})
+		}
 	}
 
 	logging.ScanComplete(len(accountResults))
