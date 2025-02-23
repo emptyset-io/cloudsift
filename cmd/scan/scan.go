@@ -349,7 +349,29 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	// Log scan start with configuration and start timing
+	// Initialize results map
+	accountResults := make(map[string]*scanResult)
+	for _, account := range accounts {
+		accountResults[account.ID] = &scanResult{
+			AccountID:   account.ID,
+			AccountName: account.Name,
+			Results:     make(map[string]awsinternal.ScanResults),
+		}
+	}
+
+	// Create tasks for each scanner+region+account combination
+	var tasks []worker.Task
+	var resultsMutex sync.Mutex
+	progressMap := newScannerProgressMap()
+	actualTasks := 0
+
+	// Initialize shared worker pool
+	if err := worker.InitSharedPool(config.Config.MaxWorkers); err != nil {
+		return fmt.Errorf("failed to initialize worker pool: %w", err)
+	}
+	workerPool := worker.GetSharedPool()
+
+	// Log scan start with configuration
 	var scannerNames []string
 	for _, s := range scanners {
 		scannerNames = append(scannerNames, s.Label())
@@ -366,27 +388,6 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 	startTime := time.Now()
 	logging.ScanStart(scannerNames, accountInfo, regions)
-
-	// Initialize results map
-	accountResults := make(map[string]*scanResult)
-	for _, account := range accounts {
-		accountResults[account.ID] = &scanResult{
-			AccountID:   account.ID,
-			AccountName: account.Name,
-			Results:     make(map[string]awsinternal.ScanResults),
-		}
-	}
-
-	// Create tasks for each scanner+region+account combination
-	var tasks []worker.Task
-	var resultsMutex sync.Mutex
-	progressMap := newScannerProgressMap()
-
-	// Initialize shared worker pool
-	if err := worker.InitSharedPool(config.Config.MaxWorkers); err != nil {
-		return fmt.Errorf("failed to initialize worker pool: %w", err)
-	}
-	workerPool := worker.GetSharedPool()
 
 	// Start progress logger
 	ctx, cancel := context.WithCancel(context.Background())
@@ -414,7 +415,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						utilization := float64(activeWorkers) / float64(maxWorkers) * 100
 
 						// Log header with detailed worker stats
-						logging.Progress(fmt.Sprintf("Pending Scanners (Workers: %d active (%d%% utilized), %d idle of %d total):", 
+						logging.Progress(fmt.Sprintf("Pending Scanners (Workers: %d active (%d%% utilized), %d idle of %d total):",
 							activeWorkers, int(utilization), freeWorkers, maxWorkers), nil)
 
 						// Sort scanners by account ID and scanner name for consistent output
@@ -445,7 +446,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						if metrics.CompletedTasks > 0 {
 							avgExecMs := metrics.AverageExecutionMs
 							tasksPerSec := float64(metrics.CompletedTasks) / (float64(metrics.TotalExecutionMs) / 1000.0)
-							logging.Progress(fmt.Sprintf("  Stats: %d completed, %d failed, %.1f tasks/sec, avg %.1fs per task", 
+							logging.Progress(fmt.Sprintf("  Stats: %d completed, %d failed, %.1f tasks/sec, avg %.1fs per task",
 								metrics.CompletedTasks,
 								metrics.FailedTasks,
 								tasksPerSec,
@@ -467,6 +468,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 		for _, region := range scanRegions {
 			for _, account := range accounts {
+				actualTasks++
 				scanner := scanner // Create new variable for closure
 				region := region
 				account := account
@@ -544,8 +546,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// Execute tasks using the worker pool
 	workerPool.ExecuteTasks(tasks)
 
-	// Get worker pool metrics
+	// Verify task count matches expected scans
 	metrics := workerPool.GetMetrics()
+
+	// Get worker pool metrics
 	logging.Info("Worker pool metrics", map[string]interface{}{
 		"total_tasks":        metrics.TotalTasks,
 		"completed_tasks":    metrics.CompletedTasks,
@@ -555,16 +559,6 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		"tasks_per_second":   float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000,
 		"worker_utilization": float64(metrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
 	})
-
-	// Calculate total scans for metrics
-	totalScans := 0
-	for _, scanner := range scanners {
-		if isIAMScanner(scanner) {
-			totalScans += len(accounts) // One scan per account for IAM
-		} else {
-			totalScans += len(accounts) * len(regions) // One scan per account per region for others
-		}
-	}
 
 	// Output results
 	switch opts.output {
@@ -600,19 +594,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 			// Calculate scan metrics
 			duration := time.Since(startTime).Seconds()
-			poolMetrics := workerPool.GetMetrics()
 			metrics := html.ScanMetrics{
-				TotalScans:         totalScans,
-				CompletedScans:     poolMetrics.CompletedTasks,
-				FailedScans:        poolMetrics.FailedTasks,
+				CompletedScans:     metrics.CompletedTasks,
+				FailedScans:        metrics.FailedTasks,
 				TotalRunTime:       duration,
-				AvgScansPerSecond:  float64(poolMetrics.CompletedTasks) / duration,
+				AvgScansPerSecond:  float64(metrics.CompletedTasks) / duration,
 				CompletedAt:        time.Now(),
-				PeakWorkers:        poolMetrics.PeakWorkers,
+				PeakWorkers:        metrics.PeakWorkers,
 				MaxWorkers:         config.Config.MaxWorkers,
-				WorkerUtilization:  float64(poolMetrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
-				AvgExecutionTimeMs: poolMetrics.AverageExecutionMs,
-				TasksPerSecond:     float64(poolMetrics.CompletedTasks) / float64(poolMetrics.AverageExecutionMs) * 1000,
+				WorkerUtilization:  float64(metrics.PeakWorkers) / float64(config.Config.MaxWorkers) * 100,
+				AvgExecutionTimeMs: metrics.AverageExecutionMs,
+				TasksPerSecond:     float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000,
 			}
 
 			outputPath := "reports/scan_report.html"

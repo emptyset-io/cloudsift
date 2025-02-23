@@ -34,6 +34,9 @@ type PoolMetrics struct {
 // Task represents a unit of work to be executed
 type Task func(ctx context.Context) error
 
+// markerTask is a special task used for synchronization
+type markerTask Task
+
 // Pool manages a pool of workers for executing tasks concurrently
 type Pool struct {
 	maxWorkers    int
@@ -114,10 +117,23 @@ func (p *Pool) Submit(task Task) {
 		return
 	}
 
-	atomic.AddInt64(&p.metrics.TotalTasks, 1)
 	select {
 	case p.tasks <- task:
 		// Task submitted successfully
+	case <-p.ctx.Done():
+		// Pool is shutting down
+	}
+}
+
+// submitMarker submits a marker task that doesn't count towards TotalTasks
+func (p *Pool) submitMarker(task markerTask) {
+	// Don't submit if pool is stopping
+	if atomic.LoadInt32(&p.stopping) == 1 {
+		return
+	}
+
+	select {
+	case p.tasks <- Task(task):
 	case <-p.ctx.Done():
 		// Pool is shutting down
 	}
@@ -199,10 +215,10 @@ func (p *Pool) WaitForTasks() {
 	wg.Add(1)
 
 	// Submit a marker task that will only complete after all previous tasks
-	p.Submit(func(ctx context.Context) error {
+	p.submitMarker(markerTask(func(ctx context.Context) error {
 		wg.Done()
 		return nil
-	})
+	}))
 
 	// Wait for all tasks to complete
 	wg.Wait()
@@ -213,6 +229,11 @@ func (p *Pool) ExecuteTasks(tasks []Task) {
 	// Create a WaitGroup to track all tasks
 	var wg sync.WaitGroup
 	wg.Add(len(tasks))
+
+	// Update total task count
+	p.metrics.mu.Lock()
+	p.metrics.TotalTasks += int64(len(tasks))
+	p.metrics.mu.Unlock()
 
 	// Wrap each task to track completion
 	for _, t := range tasks {
