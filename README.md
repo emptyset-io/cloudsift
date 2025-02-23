@@ -64,6 +64,17 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
   - Cross-account role assumption
   - Regional endpoint optimization
 
+## Example Report
+
+You can view an example of a CloudSift report at [emptyset-io.github.io/cloudsift/examples/output/sample_report.html](https://emptyset-io.github.io/cloudsift/examples/output/sample_report.html). This report showcases the various features and insights that CloudSift provides, including:
+
+- Resource utilization metrics
+- Cost analysis and potential savings
+- Resource details and metadata
+- Usage patterns and recommendations
+
+Note: This example uses generated sample data and does not reflect real AWS resources or costs. It is intended to demonstrate the report format and features only.
+
 ## Prerequisites
 
 ### AWS Setup
