@@ -8,19 +8,62 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
 - **Cost Analysis**: Get detailed cost breakdowns for unused resources to understand potential savings
 - **Resource Discovery**: Comprehensive scanning of various AWS services:
   - EC2 Instances
+    - CPU and memory utilization analysis
+    - Attached EBS volume tracking
+    - Instance state monitoring
   - EBS Volumes & Snapshots
+    - Unused volume detection
+    - Orphaned snapshot identification
+    - Cost optimization recommendations
   - Elastic IPs
+    - Unattached IP detection
+    - Usage patterns analysis
   - Load Balancers (ELB)
+    - Classic and Application LB support
+    - Traffic pattern analysis
+    - Idle LB detection
   - RDS Instances
-  - S3 Buckets
+    - Database utilization metrics
+    - Idle instance detection
   - IAM Users & Roles
+    - Last access tracking
+    - Unused credential detection
+    - Service role analysis
   - Security Groups
+    - Unused group detection
+    - Rule analysis
   - VPCs
+    - Resource utilization
+    - Default VPC identification
   - DynamoDB Tables
+    - Table usage metrics
+    - Provisioned vs actual capacity
   - OpenSearch Domains
-- **HTML Report Generation**: Generate detailed, interactive HTML reports with resource metadata and cost information
-- **Concurrent Scanning**: Efficient parallel scanning with configurable worker pools
-- **Flexible Output**: Support for both JSON and text-based logging formats
+    - Cluster utilization
+    - Resource optimization
+- **HTML Report Generation**: 
+  - Interactive, modern UI
+  - Resource filtering and sorting
+  - Cost breakdown charts
+  - Detailed resource metadata
+  - Action recommendations
+- **Concurrent Scanning**: 
+  - Efficient parallel scanning
+  - Configurable worker pools
+  - Real-time progress tracking
+  - Resource-aware execution
+- **Flexible Output**:
+  - JSON output for programmatic processing
+  - HTML reports for visualization
+  - Text-based logging with multiple verbosity levels
+  - Optional S3 output storage
+- **Advanced Features**:
+  - Custom scan intervals
+  - Resource age analysis
+  - Cost projection
+  - Tag-based filtering
+  - Cross-account role assumption
+  - Regional endpoint optimization
 
 ## Prerequisites
 
