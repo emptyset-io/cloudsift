@@ -5,7 +5,23 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
 ## Key Features
 
 - **Multi-Account & Region Scanning**: Seamlessly scan multiple AWS organizations and regions to identify unused resources
-- **Cost Analysis**: Get detailed cost breakdowns for unused resources to understand potential savings
+- **Real-Time Cost Analysis**: 
+  - Live cost estimation using AWS Pricing API
+  - Smart caching system to reduce API calls and improve performance
+  - Detailed cost breakdowns for all resource types
+  - Hourly, daily, monthly, and yearly cost projections
+  - Resource lifetime cost calculations
+  - Support for all AWS regions and pricing tiers
+- **Intelligent Rate Limiting**:
+  - Adaptive rate limiting with exponential backoff
+  - Automatic request throttling to prevent API limits
+  - Smart failure detection and recovery
+  - Configurable limits and retry policies
+- **High-Performance Worker Pool**:
+  - I/O optimized worker allocation (default: CPU cores × 8)
+  - Dynamic task distribution
+  - Real-time performance metrics
+  - Graceful shutdown handling
 - **Resource Discovery**: Comprehensive scanning of various AWS services:
   - EC2 Instances
     - CPU and memory utilization analysis
@@ -74,6 +90,121 @@ You can view an example of a CloudSift report [here](https://emptyset-io.github.
 - Usage patterns and recommendations
 
 Note: This example uses generated sample data and does not reflect real AWS resources or costs. It is intended to demonstrate the report format and features only.
+
+## Cost Estimation
+
+CloudSift includes a sophisticated cost estimation system that provides real-time cost analysis for AWS resources:
+
+### Features
+
+- **Live AWS Pricing**: Uses the AWS Pricing API to get current pricing information for all resource types
+- **Intelligent Caching**: 
+  - Caches pricing data locally to minimize API calls
+  - Automatically refreshes stale cache entries
+  - Persists across runs to maintain performance
+- **Comprehensive Coverage**:
+  - Supports all AWS regions and their specific pricing
+  - Handles complex pricing models (e.g., EC2 instance types, EBS volume types)
+  - Accounts for regional price variations
+- **Cost Breakdowns**:
+  - Hourly rates
+  - Daily projections
+  - Monthly estimates
+  - Yearly forecasts
+  - Lifetime costs based on resource creation time
+- **Resource-Specific Calculations**:
+  - EC2: Instance type and region-specific pricing
+  - EBS: Volume type, size, and IOPS
+  - RDS: Instance class and storage calculations
+  - ELB: Load balancer type and data processing
+  - DynamoDB: Provisioned capacity and storage
+  - OpenSearch: Instance count and storage size
+
+### Cache Management
+
+The cost estimator maintains a local cache at `cache/costs.json` to optimize performance:
+
+- Automatically creates and manages the cache directory
+- Thread-safe cache access for concurrent operations
+- Graceful handling of cache misses
+- Periodic cache updates to maintain accuracy
+
+## Rate Limiting
+
+CloudSift implements an intelligent rate limiting system to handle AWS API requests efficiently:
+
+### Features
+
+- **Adaptive Rate Control**:
+  - Default rate: 5 requests per second
+  - Configurable requests per second
+  - Token bucket algorithm implementation
+  - Continuous token replenishment
+
+- **Smart Backoff Strategy**:
+  - Exponential backoff with configurable parameters
+  - Base delay: 1 second
+  - Maximum delay: 120 seconds
+  - Maximum retries: 10 attempts
+  - Automatic backoff reset after 5 minutes of success
+
+- **Failure Handling**:
+  - Automatic throttling on API failures
+  - Progressive backoff on consecutive failures
+  - Graceful recovery mechanisms
+  - Detailed failure logging and metrics
+
+### Configuration
+
+The rate limiter can be customized through the configuration:
+
+```go
+type RateLimitConfig struct {
+    RequestsPerSecond float64       // Default: 5.0
+    MaxRetries       int           // Default: 10
+    BaseDelay        time.Duration // Default: 1s
+    MaxDelay         time.Duration // Default: 120s
+}
+```
+
+See [internal/config/ratelimit.go](https://github.com/emptyset-io/cloudsift/blob/main/internal/config/ratelimit.go) for the complete rate limit configuration.
+
+## Worker Pool
+
+CloudSift uses a highly optimized worker pool system for concurrent operations:
+
+### Features
+
+- **Dynamic Scaling**:
+  - Default workers: CPU cores × 8 (optimized for I/O-bound tasks)
+  - Configurable maximum worker limit
+  - Automatic worker management
+
+- **Performance Metrics**:
+  - Total tasks executed
+  - Completed vs failed tasks
+  - Current and peak worker counts
+  - Average execution time
+  - Total execution duration
+
+- **Task Management**:
+  - Buffered task queue
+  - Priority task handling
+  - Graceful shutdown
+  - Task synchronization
+
+### Performance Optimization
+
+The worker pool is specifically designed for I/O-bound AWS API operations:
+
+- Default worker count is set to 8 times the number of CPU cores
+- This multiplier is optimal for I/O-bound tasks where workers spend most time waiting
+- Users can adjust the worker count based on their specific needs and API limits
+- Monitor the metrics to find the optimal worker count for your use case
+
+### Configuration
+
+The worker pool size can be configured using the `--max-workers` CLI flag. The default is set to 8 times the number of CPU cores since the application is I/O bound. Adjust this value based on your API limits and system capabilities.
 
 ## Prerequisites
 
@@ -189,10 +320,16 @@ CloudSift provides a simple command-line interface:
 # List available scanners
 cloudsift list scanners
 
-# List AWS accounts
+# List AWS accounts in single account mode
 cloudsift list accounts
 
-# Run a scan with all scanners
+# List AWS accounts in organization mode
+cloudsift list accounts --organization-role <org_role>
+
+# Run a scan in single account mode
+cloudsift scan
+
+# Run a scan in organization mode with all scanners
 cloudsift scan --organization-role <org_role> --scanner-role <scanner_role>
 
 # Run specific scanners
