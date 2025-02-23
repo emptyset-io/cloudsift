@@ -1,8 +1,13 @@
 # CloudSift
 
+<!-- PROJECT LOGO -->
+<br />
 <div align="center">
+  <a href="https://github.com/othneildrew/Best-README-Template">
+    <img src="https://cloudsift.io/_astro/logo.DKmiXdWf_Z25aT8Y.svg" alt="Lencelot the Cloudsift Logo" height="100">
+  </a>
 
-**AWS Resource Scanner & Cost Optimizer**
+  **AWS Resource Scanner & Cost Optimizer**
 
 *Scan AWS resources across multiple Organizations, Accounts, and Regions to identify unused resources and optimize costs.*
 
@@ -10,7 +15,6 @@
 [Documentation](#documentation) •
 [Installation](#installation) •
 [Usage](#usage)
-
 </div>
 
 ## 📋 Table of Contents
