@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -219,7 +220,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		if opts.bucket == "" {
 			return fmt.Errorf("S3 bucket not specified. Use --bucket flag to specify the S3 bucket")
 		}
-		if err := validateS3Access(opts.bucket, opts.bucketRegion); err != nil {
+		if err := validateS3Access(opts.bucket, opts.bucketRegion, opts.organizationRole); err != nil {
 			return fmt.Errorf("S3 bucket validation failed: %w", err)
 		}
 	}
@@ -634,9 +635,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	case "s3":
 		writer := output.NewWriter(output.Config{
-			Type:     output.S3,
-			S3Bucket: opts.bucket,
-			S3Region: opts.bucketRegion,
+			Type:             output.S3,
+			S3Bucket:         opts.bucket,
+			S3Region:         opts.bucketRegion,
+			OrganizationRole: opts.organizationRole,
 		})
 
 		// Write results for each account
@@ -674,15 +676,83 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	return nil
 }
 
+// getRoleARN returns the full ARN for a role. If the input is already an ARN, returns it as is.
+func getRoleARN(sess *session.Session, roleName string) (string, error) {
+	// If it's already an ARN, return it
+	if strings.HasPrefix(roleName, "arn:aws:iam::") {
+		return roleName, nil
+	}
+
+	// Get the account ID using STS
+	stsClient := sts.New(sess)
+	result, err := stsClient.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	// Construct the role ARN
+	return fmt.Sprintf("arn:aws:iam::%s:role/%s", *result.Account, roleName), nil
+}
+
+// getSessionWithOrgRole creates an AWS session and assumes the organization role if specified
+func getSessionWithOrgRole(region, orgRole string) (*session.Session, error) {
+	// Create base session
+	sess, err := awsinternal.GetSession("", region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+	}
+
+	// If organization role is specified, assume it
+	if orgRole != "" {
+		// Get full role ARN
+		roleARN, err := getRoleARN(sess, orgRole)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get role ARN: %w", err)
+		}
+
+		// Create assume role input
+		roleSessionName := fmt.Sprintf("cloudsift-scan-%d", time.Now().Unix())
+		input := &sts.AssumeRoleInput{
+			RoleArn:         aws.String(roleARN),
+			RoleSessionName: aws.String(roleSessionName),
+		}
+
+		// Assume the role
+		result, err := sts.New(sess).AssumeRole(input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to assume role: %w", err)
+		}
+
+		// Create new session with temporary credentials
+		sess, err = session.NewSession(&aws.Config{
+			Region: aws.String(region),
+			Credentials: credentials.NewStaticCredentials(
+				*result.Credentials.AccessKeyId,
+				*result.Credentials.SecretAccessKey,
+				*result.Credentials.SessionToken,
+			),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create session with assumed role: %w", err)
+		}
+		logging.Debug("Assumed organization role", map[string]interface{}{
+			"role":   roleARN,
+			"region": region,
+		})
+	}
+
+	return sess, nil
+}
+
 // validateS3Access validates that we can write to the specified S3 bucket
-func validateS3Access(bucket, region string) error {
+func validateS3Access(bucket, region string, orgRole string) error {
 	logging.Info("Starting S3 bucket access validation", map[string]interface{}{
 		"bucket": bucket,
 		"region": region,
 	})
 
-	// Create AWS session for S3 operations
-	sess, err := awsinternal.GetSession("", region)
+	// Create AWS session with organization role if specified
+	sess, err := getSessionWithOrgRole(region, orgRole)
 	if err != nil {
 		logging.Error("Failed to create AWS session", err, map[string]interface{}{
 			"bucket": bucket,
@@ -690,27 +760,18 @@ func validateS3Access(bucket, region string) error {
 		})
 		return fmt.Errorf("failed to create AWS session: %w", err)
 	}
-	logging.Debug("Created AWS session", map[string]interface{}{
-		"region": region,
-	})
-
 	// Create S3 client
 	s3Client := s3.New(sess)
 
 	// Use a specific validation path that won't conflict with scan results
 	testKey := ".cloudsift_validation"
-	testData := []byte("test")
 
-	logging.Debug("Attempting to write test file", map[string]interface{}{
-		"bucket": bucket,
-		"key":    testKey,
-	})
-
-	// Try to write a test file
+	// Try to upload a test file with required encryption
 	_, err = s3Client.PutObject(&s3.PutObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(testKey),
-		Body:   bytes.NewReader(testData),
+		Bucket:               aws.String(bucket),
+		Key:                 aws.String(testKey),
+		Body:                bytes.NewReader([]byte("test")),
+		ServerSideEncryption: aws.String("aws:kms"),
 	})
 	if err != nil {
 		logging.Error("Failed to write test file to S3", err, map[string]interface{}{
