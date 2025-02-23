@@ -61,7 +61,6 @@ CloudSift is a powerful Go-based utility designed to scan AWS resources across m
   - Custom scan intervals
   - Resource age analysis
   - Cost projection
-  - Tag-based filtering
   - Cross-account role assumption
   - Regional endpoint optimization
 
