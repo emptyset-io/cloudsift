@@ -180,6 +180,126 @@ cloudsift scan --organization-role <org_role> --scanner-role <scanner_role> --re
 cloudsift scan --max-workers 10 --organization-role <org_role> --scanner-role <scanner_role>
 ```
 
+## Usage
+
+CloudSift provides a comprehensive command-line interface with several commands for managing and inspecting AWS resources.
+
+### Global Flags
+
+These flags are available for all commands:
+
+```bash
+--log-format string          # Log output format (text or json) (default "text")
+--log-level string          # Set logging level (DEBUG, INFO, WARN, ERROR) (default "INFO")
+--max-workers int           # Maximum number of concurrent workers (default 12)
+--organization-role string  # Role name to assume for organization-wide operations
+--profile, -p string       # AWS profile to use (supports SSO profiles) (default "default")
+--scanner-role string      # Role name to assume for scanning operations
+```
+
+### Scan Command
+
+The `scan` command is used to scan AWS resources for potential cost savings. It supports scanning multiple resource types across multiple regions and accounts.
+
+```bash
+cloudsift scan [flags]
+
+# Flags:
+--bucket string          # S3 bucket name (required when --output=s3)
+--bucket-region string   # S3 bucket region (required when --output=s3)
+--days-unused int        # Number of days a resource must be unused to be reported (default 90)
+--output string          # Output type (filesystem, s3) (default "filesystem")
+--output-format, -o string # Output format (json, html) (default "html")
+--regions string         # Comma-separated list of regions to scan (default: all available regions)
+--scanners string        # Comma-separated list of scanners to run (default: all available scanners)
+```
+
+#### Scan Examples
+
+```bash
+# Scan all resources in all regions of current account
+cloudsift scan
+
+# Scan EBS volumes in us-west-2 of current account
+cloudsift scan --scanners ebs-volumes --regions us-west-2
+
+# Scan multiple resource types in multiple regions of all organization accounts
+cloudsift scan --scanners ebs-volumes,ebs-snapshots \
+               --regions us-west-2,us-east-1 \
+               --organization-role OrganizationAccessRole \
+               --scanner-role SecurityAuditRole
+
+# Output HTML report to S3
+cloudsift scan --output s3 --output-format html \
+               --bucket my-bucket --bucket-region us-west-2
+
+# Output JSON results to S3
+cloudsift scan --output s3 --output-format json \
+               --bucket my-bucket --bucket-region us-west-2
+```
+
+### List Command
+
+The `list` command provides information about various AWS resources and configurations.
+
+#### List Accounts
+```bash
+cloudsift list accounts [flags]
+
+# Examples:
+# List current account
+cloudsift list accounts
+
+# List all accounts in organization
+cloudsift list accounts --organization-role OrganizationAccessRole
+```
+
+#### List Profiles
+```bash
+cloudsift list profiles
+
+# Lists all available AWS credential profiles from the AWS credentials 
+# and config files
+```
+
+#### List Scanners
+```bash
+cloudsift list scanners
+
+# Lists all available resource scanners that can be used to scan 
+# AWS resources
+```
+
+### Version Command
+
+```bash
+cloudsift version
+
+# Displays version information including:
+# - Version number
+# - Git commit hash
+# - Build time
+# - Go version
+```
+
+### Advanced Usage
+
+1. **Multi-Account Scanning**
+   - Use `--organization-role` to specify the role for organization-wide operations
+   - Use `--scanner-role` to specify the role for scanning individual accounts
+   - When both roles are specified, all accounts in the organization will be scanned
+
+2. **Output Options**
+   - Default output is HTML format to filesystem
+   - Support for JSON output format
+   - Optional S3 output with bucket configuration
+   - Configurable unused resource threshold (default 90 days)
+
+3. **Performance Tuning**
+   - Adjust `--max-workers` for concurrent operations (default: 12)
+   - Configure logging level and format for debugging
+   - Region-specific scanning for focused analysis
+
 ## Documentation
 
 ### Cost Estimation System
