@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/spf13/cobra"
 
@@ -211,6 +212,16 @@ func getScanners(scannerList string) ([]awsinternal.Scanner, error) {
 }
 
 func runScan(cmd *cobra.Command, opts *scanOptions) error {
+	// Validate S3 access first if using S3 output
+	if opts.output == "s3" {
+		if opts.bucket == "" {
+			return fmt.Errorf("S3 bucket not specified. Use --bucket flag to specify the S3 bucket")
+		}
+		if err := validateS3Access(opts.bucket, opts.bucketRegion); err != nil {
+			return fmt.Errorf("S3 bucket validation failed: %w", err)
+		}
+	}
+
 	// Get and validate scanners
 	scanners, err := getScanners(opts.scanners)
 	if err != nil {
@@ -659,5 +670,88 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	logging.ScanComplete(len(accountResults))
+	return nil
+}
+
+// validateS3Access validates that we can write to the specified S3 bucket
+func validateS3Access(bucket, region string) error {
+	logging.Info("Starting S3 bucket access validation", map[string]interface{}{
+		"bucket": bucket,
+		"region": region,
+	})
+
+	// Create AWS session for S3 operations
+	sess, err := awsinternal.GetSession("", region)
+	if err != nil {
+		logging.Error("Failed to create AWS session", err, map[string]interface{}{
+			"bucket": bucket,
+			"region": region,
+		})
+		return fmt.Errorf("failed to create AWS session: %w", err)
+	}
+	logging.Debug("Created AWS session", map[string]interface{}{
+		"region": region,
+	})
+
+	writer := output.NewWriter(output.Config{
+		Type:     output.S3,
+		S3Bucket: bucket,
+		S3Region: region,
+	})
+	logging.Debug("Created S3 writer", map[string]interface{}{
+		"bucket": bucket,
+		"region": region,
+	})
+
+	// Use a specific test file path that we can clean up
+	testKey := fmt.Sprintf("test/validation_%s.txt", time.Now().Format("20060102_150405"))
+	testData := []byte("test")
+
+	logging.Debug("Attempting to write test file", map[string]interface{}{
+		"bucket": bucket,
+		"key":    testKey,
+	})
+
+	// Try to write a test file
+	if err := writer.Write(testKey, testData); err != nil {
+		logging.Error("Failed to write test file to S3", err, map[string]interface{}{
+			"bucket": bucket,
+			"key":    testKey,
+		})
+		return fmt.Errorf("failed to validate S3 bucket access: %w", err)
+	}
+	logging.Info("Successfully wrote test file to S3", map[string]interface{}{
+		"bucket": bucket,
+		"key":    testKey,
+	})
+
+	// Create S3 service client
+	s3Client := s3.New(sess)
+
+	// Clean up the test file
+	logging.Debug("Attempting to clean up test file", map[string]interface{}{
+		"bucket": bucket,
+		"key":    testKey,
+	})
+	_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(testKey),
+	})
+	if err != nil {
+		logging.Warn("Failed to clean up S3 test file", err, map[string]interface{}{
+			"bucket": bucket,
+			"key":    testKey,
+		})
+	} else {
+		logging.Info("Successfully cleaned up test file", map[string]interface{}{
+			"bucket": bucket,
+			"key":    testKey,
+		})
+	}
+
+	logging.Info("S3 bucket access validation complete", map[string]interface{}{
+		"bucket": bucket,
+		"region": region,
+	})
 	return nil
 }
