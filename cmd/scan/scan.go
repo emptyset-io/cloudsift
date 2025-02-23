@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -183,6 +184,7 @@ func getScanners(scannerList string) ([]awsinternal.Scanner, error) {
 
 	// If no scanners specified, get all available scanners
 	if scannerList == "" {
+		// If no scanners specified, get all available scanners
 		names := awsinternal.DefaultRegistry.ListScanners()
 		if len(names) == 0 {
 			return nil, fmt.Errorf("no scanners available in registry")
@@ -504,6 +506,9 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						logging.ScannerError(scanner.Label(), account.ID, account.Name, logRegion, err)
 						return fmt.Errorf("failed to create regional session for account %s: %w", account.ID, err)
 					}
+					logging.Debug("Created regional session", map[string]interface{}{
+						"region": region,
+					})
 
 					results, err := scanner.Scan(awsinternal.ScanOptions{
 						Region:     region,
@@ -628,10 +633,6 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			fmt.Printf("HTML report written to %s\n", outputPath)
 		}
 	case "s3":
-		if opts.bucket == "" {
-			return fmt.Errorf("S3 bucket not specified. Use --bucket flag to specify the S3 bucket")
-		}
-
 		writer := output.NewWriter(output.Config{
 			Type:     output.S3,
 			S3Bucket: opts.bucket,
@@ -693,18 +694,11 @@ func validateS3Access(bucket, region string) error {
 		"region": region,
 	})
 
-	writer := output.NewWriter(output.Config{
-		Type:     output.S3,
-		S3Bucket: bucket,
-		S3Region: region,
-	})
-	logging.Debug("Created S3 writer", map[string]interface{}{
-		"bucket": bucket,
-		"region": region,
-	})
+	// Create S3 client
+	s3Client := s3.New(sess)
 
-	// Use a specific test file path that we can clean up
-	testKey := fmt.Sprintf("test/validation_%s.txt", time.Now().Format("20060102_150405"))
+	// Use a specific validation path that won't conflict with scan results
+	testKey := ".cloudsift_validation"
 	testData := []byte("test")
 
 	logging.Debug("Attempting to write test file", map[string]interface{}{
@@ -713,7 +707,12 @@ func validateS3Access(bucket, region string) error {
 	})
 
 	// Try to write a test file
-	if err := writer.Write(testKey, testData); err != nil {
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(testKey),
+		Body:   bytes.NewReader(testData),
+	})
+	if err != nil {
 		logging.Error("Failed to write test file to S3", err, map[string]interface{}{
 			"bucket": bucket,
 			"key":    testKey,
@@ -724,9 +723,6 @@ func validateS3Access(bucket, region string) error {
 		"bucket": bucket,
 		"key":    testKey,
 	})
-
-	// Create S3 service client
-	s3Client := s3.New(sess)
 
 	// Clean up the test file
 	logging.Debug("Attempting to clean up test file", map[string]interface{}{
