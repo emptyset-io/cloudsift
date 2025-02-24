@@ -240,7 +240,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			})
 			// Fall back to current session
 			logging.Info("Falling back to current session")
-			baseSession, err = session.NewSession()
+			baseSession, err = awsinternal.NewSession(config.Config.Profile, "")
 			if err != nil {
 				logging.Error("Failed to create base session", err, nil)
 				return nil // Return nil to continue without failing
@@ -261,8 +261,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	} else {
 		logging.Debug("Using current session", nil)
-		// Use current session
-		baseSession, err = session.NewSession()
+		// Use current session with profile
+		baseSession, err = awsinternal.NewSession(config.Config.Profile, "")
 		if err != nil {
 			logging.Error("Failed to create base session", err, nil)
 			return nil // Return nil to continue without failing

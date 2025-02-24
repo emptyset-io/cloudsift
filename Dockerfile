@@ -24,11 +24,7 @@ COPY --from=builder /app /app
 RUN trivy filesystem --no-progress --ignore-unfixed --severity HIGH,CRITICAL /app
 
 # Stage 5: Final runtime
-FROM alpine:3.19 AS runtime
-
-# Add non-root user
-RUN addgroup -S cloudsift && \
-    adduser -S cloudsift -G cloudsift
+FROM alpine:latest AS runtime
 
 # Install runtime dependencies
 RUN apk add --no-cache \
@@ -36,16 +32,17 @@ RUN apk add --no-cache \
     tzdata \
     && rm -rf /var/cache/apk/*
 
+# Create /app directory
+RUN mkdir -p /app
+
+# Set /app as the working directory
+WORKDIR /app
+
+# Set the HOME environment variable to /app
+ENV HOME=/app
+
 # Copy binary from builder
 COPY --from=builder /app/bin/cloudsift /usr/local/bin/cloudsift
-
-# Set up configuration directory
-RUN mkdir -p /etc/cloudsift && \
-    chown -R cloudsift:cloudsift /etc/cloudsift
-
-# Switch to non-root user
-USER cloudsift
-WORKDIR /home/cloudsift
 
 # Set environment variables
 ENV AWS_SDK_LOAD_CONFIG=1

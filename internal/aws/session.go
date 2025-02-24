@@ -11,6 +11,8 @@ import (
 
 	"cloudsift/internal/logging"
 	"net/http"
+
+	"cloudsift/internal/config"
 )
 
 // GetSession creates a new AWS session with optional region and role
@@ -57,13 +59,8 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 		"region":            region,
 	})
 
-	// Create base session with region
-	cfg := aws.NewConfig()
-	if region != "" {
-		cfg = cfg.WithRegion(region)
-	}
-
-	baseSession, err := session.NewSession(cfg)
+	// Create base session with profile and region
+	baseSession, err := NewSession(config.Config.Profile, region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base AWS session: %w", err)
 	}
@@ -89,7 +86,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 
 		orgRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *baseIdentity.Account, organizationRole)
 		orgCreds := stscreds.NewCredentials(currentSession, orgRoleARN)
-		orgSession, err := session.NewSession(cfg.WithCredentials(orgCreds))
+		orgSession, err := session.NewSession(aws.NewConfig().WithCredentials(orgCreds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to assume organization role %s: %w", organizationRole, err)
 		}
@@ -118,7 +115,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 
 			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", targetAccountID, scannerRole)
 			scannerCreds := stscreds.NewCredentials(currentSession, scannerRoleARN)
-			scannerSession, err := session.NewSession(cfg.WithCredentials(scannerCreds))
+			scannerSession, err := session.NewSession(aws.NewConfig().WithCredentials(scannerCreds))
 			if err != nil {
 				return nil, fmt.Errorf("failed to assume scanner role %s in account %s: %w", scannerRole, targetAccountID, err)
 			}
@@ -145,7 +142,7 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 
 			scannerRoleARN := fmt.Sprintf("arn:aws:iam::%s:role/%s", *identity.Account, scannerRole)
 			scannerCreds := stscreds.NewCredentials(currentSession, scannerRoleARN)
-			scannerSession, err := session.NewSession(cfg.WithCredentials(scannerCreds))
+			scannerSession, err := session.NewSession(aws.NewConfig().WithCredentials(scannerCreds))
 			if err != nil {
 				return nil, fmt.Errorf("failed to assume scanner role %s: %w", scannerRole, err)
 			}
@@ -165,6 +162,24 @@ func GetSessionChain(organizationRole, scannerRole string, targetAccountID strin
 	}
 
 	return currentSession, nil
+}
+
+// NewSession creates a new AWS session with the specified profile and region
+func NewSession(profile string, region string) (*session.Session, error) {
+	cfg := aws.NewConfig()
+	if region != "" {
+		cfg = cfg.WithRegion(region)
+	}
+
+	// Create session options with profile
+	opts := session.Options{
+		Config:            *cfg,
+		Profile:          profile,
+		SharedConfigState: session.SharedConfigEnable,
+	}
+
+	// Create session with profile
+	return session.NewSessionWithOptions(opts)
 }
 
 // GetSessionInRegion creates a new session in the specified region using credentials from an existing session
