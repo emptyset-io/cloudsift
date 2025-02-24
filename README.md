@@ -25,6 +25,9 @@
   - [Output & Reporting](#output--reporting)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
+  - [Multi-Account Setup](#multi-account-setup)
+    - [Manual Setup](#manual-setup)
+    - [Automated CloudFormation Setup](#automated-cloudformation-setup)
   - [Installation](#installation)
   - [Basic Usage](#basic-usage)
 - [Documentation](#documentation)
@@ -134,29 +137,40 @@ CloudSift includes a sophisticated real-time cost analysis system:
 1. **AWS Credentials**:  
    Configure your AWS credentials using `aws configure` or set up the `~/.aws/credentials` file.
 
-2. **Deploy Required Infrastructure**:  
-   Before using CloudSift, you must deploy the required AWS infrastructure (IAM roles and S3 bucket) using our CloudFormation template. 
+### Multi-Account Setup
+
+CloudSift can operate in either single-account or multi-account mode:
+- **Single-Account Mode**: Only requires AWS credentials with appropriate permissions
+- **Multi-Account Mode**: Requires organization roles and an S3 bucket for storing results
+
+Choose one of the following setup methods for multi-account scanning:
+
+#### Manual Setup
+
+If you prefer to set up the infrastructure manually or need customization, create:
+- An Organization Role with permissions to list AWS Organization resources
+- A Scanner Role that can be assumed in member accounts
+- An S3 bucket with server-side encryption for storing scan results
+
+See [AWS Permissions](#aws-permissions) for detailed IAM policy requirements.
+
+#### Automated CloudFormation Setup
+
+For convenience, we provide a CloudFormation template that automatically sets up all required infrastructure. This is entirely optional and only needed for multi-account scanning.
+
+⚠️ **Important**: Deploy this template in your AWS Organization's management account.
+
+[![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?#/stacks/new?templateURL=https://cloudsift-development-public.s3.us-west-2.amazonaws.com/deployment-v1/aws/cloudsift-cloudformation-organization.json&stackName=cloudsift)
+
+The template creates:
+- Organization Role: For querying organization-level resources
+- Scanner Role: For reading resources in member accounts
+- S3 Bucket: For storing scan results with server-side encryption
    
-   ⚠️ **Important**: Deploy this template in your AWS Organization's management account.
-
-   [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?#/stacks/new?templateURL=https://cloudsift-development-public.s3.us-west-2.amazonaws.com/deployment-v1/aws/cloudsift-cloudformation-organization.json&stackName=cloudsift)
-
-
-   This template will create:
-   - Organization Role: For querying organization-level resources
-   - Scanner Role: For reading resources in member accounts
-   - S3 Bucket: For storing scan results with server-side encryption
-   
-   After deployment, note the following outputs from the CloudFormation stack:
-   - `OrganizationRoleArn`: Use this as the `--organization-role` parameter
-   - `ScannerRoleArn`: Use this as the `--scanner-role` parameter
-   - `BucketName`: Use this as the `--bucket` parameter
-
-3. **Required Roles** (for multi-account scanning):  
-   - **Organization Role**: IAM role for querying organization-level resources.  
-   - **Scanner Role**: IAM role in each account with read-only access to AWS resources.  
-
-   **Note**: If supplying just an AWS profile, the scanner will operate in single-account mode, scanning only that account. In this case, the organization and scanner roles are optional.
+After deployment, note these outputs for use with CloudSift:
+- `OrganizationRoleArn`: Use with `--organization-role`
+- `ScannerRoleArn`: Use with `--scanner-role`
+- `BucketName`: Use with `--bucket`
 
 ### Installation
 
