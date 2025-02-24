@@ -139,7 +139,8 @@ CloudSift includes a sophisticated real-time cost analysis system:
    
    ⚠️ **Important**: Deploy this template in your AWS Organization's management account.
 
-   [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?#/stacks/new?templateURL=https://cloudsift-public.s3.us-east-2.amazonaws.com/deployment-v1/aws/cloudsift-aws-standard-org.json&stackName=cloudsift)
+   [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?#/stacks/new?templateURL=https://cloudsift-development-public.s3.us-west-2.amazonaws.com/deployment-v1/aws/cloudsift-cloudformation-organization.json&stackName=cloudsift)
+
 
    This template will create:
    - Organization Role: For querying organization-level resources
