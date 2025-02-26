@@ -187,7 +187,6 @@ table {
     border-radius: var(--border-radius);
     overflow: hidden;
     margin-bottom: 0;
-    table-layout: fixed;
 }
 
 .wide table {
@@ -198,28 +197,43 @@ th, td {
     padding: 0.75rem 1rem;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-    min-width: 120px;
+    word-break: break-word;
     vertical-align: top;
 }
 
+/* Account ID column */
 th:first-child, td:first-child {
-    width: 30%;
+    width: 200px;
+    min-width: 180px;
+    max-width: 250px;
 }
 
+/* Account Name column */
 th:nth-child(2), td:nth-child(2) {
-    width: 15%;
+    width: 200px;
+    min-width: 150px;
 }
 
+/* Actions column - let it take remaining space */
 th:last-child, td:last-child {
-    width: 55%;
+    width: auto;
+}
+
+th {
+    background-color: var(--accent-light);
+    font-weight: 600;
+    color: var(--accent);
 }
 
 td {
-    white-space: normal;
-    line-height: 1.4;
     color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* Handle overflow gracefully */
+.wide {
+    overflow-x: auto;
+    max-width: 100%;
 }
 
 tr:last-child td {
