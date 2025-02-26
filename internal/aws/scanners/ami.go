@@ -130,14 +130,52 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		}
 	}
 
-	// Calculate monthly cost (similar to EBS snapshot cost calculation)
-	monthlyCost := float64(totalSnapshotSize) * 0.05 // $0.05 per GB-month for EBS snapshot storage
+	// Calculate costs using the cost estimator
+	var costs *awslib.CostBreakdown
+	costStart := time.Now()
+	var hoursRunning float64
+	if t.ami.CreationDate != nil {
+		if creationTime, err := time.Parse(time.RFC3339, *t.ami.CreationDate); err == nil {
+			hoursRunning = t.now.Sub(creationTime).Hours()
+			costConfig := awslib.ResourceCostConfig{
+				ResourceType:  "EBSSnapshots",  // AMIs are backed by EBS snapshots
+				ResourceSize: totalSnapshotSize,
+				Region:      t.region,
+				CreationTime: creationTime,
+			}
+			
+			costs, err = awslib.DefaultCostEstimator.CalculateCost(costConfig)
+			if err != nil {
+				logging.Error("Failed to calculate costs", err, map[string]interface{}{
+					"ami_id":     amiID,
+					"ami_name":   amiName,
+					"account_id": t.accountID,
+					"region":     t.region,
+				})
+			} else {
+				logging.Debug("Calculated AMI costs", map[string]interface{}{
+					"ami_id":       amiID,
+					"monthly_cost": costs.MonthlyRate,
+					"duration_ms":  time.Since(costStart).Milliseconds(),
+				})
+
+				// Calculate lifetime cost
+				lifetime := costs.HourlyRate * hoursRunning
+				costs.Lifetime = &lifetime
+			}
+		}
+	}
 
 	// Determine if AMI is unused based on criteria
 	var reasons []string
 
-	// Check age
-	if t.ami.CreationDate != nil {
+	// Check if no instances are using it
+	if runningInstances == 0 {
+		reasons = append(reasons, "No running instances are using this AMI")
+	}
+
+	// Only add age as a reason if we already have another reason
+	if len(reasons) > 0 && t.ami.CreationDate != nil {
 		creationTime, err := time.Parse(time.RFC3339, *t.ami.CreationDate)
 		if err == nil {
 			daysOld := int(t.now.Sub(creationTime).Hours() / 24)
@@ -146,11 +184,6 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 					fmt.Sprintf("AMI is older than %d days (age: %d days)", t.opts.DaysUnused, daysOld))
 			}
 		}
-	}
-
-	// Check if no instances are using it
-	if runningInstances == 0 {
-		reasons = append(reasons, fmt.Sprintf("No running instances are using this AMI. Snapshot storage costs: $%.2f/month", monthlyCost))
 	}
 
 	// If we found reasons it's unused, create a scan result
@@ -166,9 +199,10 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 				"running_instances":   runningInstances,
 				"age":                ageString,
 				"unused_reasons":      reasons,
+				"hours_running":       hoursRunning,
 			},
 			Cost: map[string]interface{}{
-				"monthly": roundCost(monthlyCost),
+				"total": costs,
 			},
 		}
 		return result, nil
