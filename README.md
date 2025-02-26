@@ -105,10 +105,10 @@ CloudSift includes a sophisticated real-time cost analysis system:
 ### Performance & Scalability
 
 - **Intelligent Rate Limiting**
-  - Adaptive rate limiting with exponential backoff
-  - Automatic request throttling
-  - Smart failure detection and recovery
-  - Configurable limits and retry policies
+  - Token bucket algorithm with 20 requests per second (RPS) default rate
+  - Exponential backoff with smart retry strategy
+  - Automatic rate adjustment based on API responses
+  - Comprehensive failure handling and recovery
 
 - **High-Performance Worker Pool**
   - I/O optimized worker allocation
@@ -369,23 +369,34 @@ The cost estimation system provides real-time analysis using the AWS Pricing API
 
 ### Rate Limiting
 
-CloudSift implements an intelligent rate limiting system:
+CloudSift implements an intelligent rate limiting system to handle AWS API requests efficiently:
 
 #### Core Features
-- Adaptive rate control (default: 5 RPS)
-- Smart backoff strategy
-- Comprehensive failure handling
-- Detailed metrics and logging
+- Token bucket algorithm with 20 requests per second (RPS) default rate
+- Exponential backoff with smart retry strategy
+- Automatic rate adjustment based on API responses
+- Comprehensive failure handling and recovery
 
 #### Configuration
+The rate limiter uses the following default settings:
+
 ```go
 type RateLimitConfig struct {
-    RequestsPerSecond float64       // Default: 5.0
-    MaxRetries       int           // Default: 10
-    BaseDelay        time.Duration // Default: 1s
-    MaxDelay         time.Duration // Default: 120s
+    RequestsPerSecond: 20.0,              // Default API request rate
+    MaxRetries:       10,                 // Maximum retry attempts
+    BaseDelay:        100 * time.Millisecond, // Initial backoff delay
+    MaxDelay:         120 * time.Second,      // Maximum backoff delay
 }
 ```
+
+#### Backoff Strategy
+1. Starts with a 100ms delay on first failure
+2. Exponentially increases delay with each retry (doubles each time)
+3. Caps maximum delay at 2 minutes
+4. Automatically resets after 5 minutes of successful operations
+5. Provides detailed debug logging of backoff state
+
+This configuration ensures efficient API usage while protecting against rate limiting and transient failures.
 
 ### Worker Pool Architecture
 

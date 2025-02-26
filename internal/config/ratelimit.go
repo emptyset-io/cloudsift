@@ -2,7 +2,7 @@ package config
 
 import "time"
 
-// RateLimitConfig holds configuration for rate limiting
+// RateLimitConfig defines rate limiting parameters
 type RateLimitConfig struct {
 	// RequestsPerSecond is the number of requests allowed per second
 	RequestsPerSecond float64
@@ -17,9 +17,9 @@ type RateLimitConfig struct {
 var (
 	// DefaultRateLimitConfig provides default values for rate limiting
 	DefaultRateLimitConfig = RateLimitConfig{
-		RequestsPerSecond: 5.0, // 5 requests per second by default
-		MaxRetries:        10,  // 10 retries
-		BaseDelay:         time.Second,
-		MaxDelay:          time.Second * 120,
+		RequestsPerSecond: 20.0,    // AWS APIs generally allow 20+ TPS for most operations
+		MaxRetries:       10,       // Keep 10 retries as it's reasonable
+		BaseDelay:        100 * time.Millisecond, // Start with 100ms delay
+		MaxDelay:         120 * time.Second,      // Keep 2 minute max delay
 	}
 )
