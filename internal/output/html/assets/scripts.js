@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
     displayLocalReportTime();
     convertTimestamps();
     initializeSearch();
+    initializeResizableColumns();
 });
 
 let costChart = null;
@@ -410,6 +411,69 @@ function displayLocalReportTime() {
     }
 }
 
+// Initialize resizable columns for the unused resources table
+function initializeResizableColumns() {
+    const table = document.querySelector('#unused-resources table');
+    if (!table) return;
+
+    const headers = table.querySelectorAll('th');
+    headers.forEach((header, index) => {
+        if (index < headers.length - 1) { // Don't add resizer to last column
+            const resizer = document.createElement('div');
+            resizer.className = 'column-resizer';
+            header.appendChild(resizer);
+            createResizableColumn(resizer, header);
+        }
+    });
+}
+
+// Setup column resizing functionality
+function createResizableColumn(resizer, header) {
+    let startX, startWidth, table, nextColumn;
+
+    resizer.addEventListener('mousedown', function(e) {
+        startX = e.pageX;
+        startWidth = header.offsetWidth;
+        table = header.closest('table');
+        const headerIndex = Array.from(header.parentElement.children).indexOf(header);
+        nextColumn = table.rows[0].cells[headerIndex + 1];
+
+        // Add resizing class for styling
+        resizer.classList.add('column-resizing');
+        document.body.classList.add('resizing');
+
+        // Add event listeners for mouse movement and release
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        
+        // Prevent text selection while resizing
+        e.preventDefault();
+    });
+
+    function onMouseMove(e) {
+        if (!table) return;
+        
+        const dx = e.pageX - startX;
+        const newWidth = Math.max(100, startWidth + dx); // Minimum width of 100px
+        
+        header.style.width = `${newWidth}px`;
+        
+        // Adjust the next column's width if it exists
+        if (nextColumn) {
+            const remainingWidth = table.offsetWidth - newWidth;
+            nextColumn.style.width = `${remainingWidth}px`;
+        }
+    }
+
+    function onMouseUp() {
+        resizer.classList.remove('column-resizing');
+        document.body.classList.remove('resizing');
+        
+        // Remove event listeners
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    }
+}
 
 // Filter resources based on account, region, or resource type
 function filterResources(filterType, value) {

@@ -187,10 +187,19 @@ table {
     border-radius: var(--border-radius);
     overflow: hidden;
     margin-bottom: 0;
+    table-layout: fixed;
 }
 
 .wide table {
     font-size: 0.9rem;
+}
+
+th {
+    background-color: var(--accent-light);
+    font-weight: 600;
+    color: var(--accent);
+    position: relative;
+    user-select: none;
 }
 
 th, td {
@@ -199,6 +208,38 @@ th, td {
     border-bottom: 1px solid var(--border-color);
     word-break: break-word;
     vertical-align: top;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Resizer handle */
+.column-resizer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    width: 5px;
+    background: transparent;
+    cursor: col-resize;
+    user-select: none;
+    touch-action: none;
+}
+
+.column-resizer:hover,
+.column-resizing {
+    background: var(--accent);
+}
+
+/* Ensure the table container allows horizontal scroll if needed */
+.wide {
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+/* Prevent text selection while resizing */
+.resizing {
+    cursor: col-resize;
+    user-select: none;
 }
 
 /* Account ID column */
@@ -219,23 +260,12 @@ th:last-child, td:last-child {
     width: auto;
 }
 
-th {
-    background-color: var(--accent-light);
-    font-weight: 600;
-    color: var(--accent);
-}
-
 td {
     color: var(--text-secondary);
     line-height: 1.4;
 }
 
 /* Handle overflow gracefully */
-.wide {
-    overflow-x: auto;
-    max-width: 100%;
-}
-
 tr:last-child td {
     border-bottom: none;
 }
