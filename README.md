@@ -29,12 +29,11 @@
     - [Manual Setup](#manual-setup)
     - [Automated CloudFormation Setup](#automated-cloudformation-setup)
   - [Installation](#installation)
-  - [Basic Usage](#basic-usage)
+  - [Usage and Configuration](#usage-and-configuration)
 - [Documentation](#documentation)
   - [Cost Estimation System](#cost-estimation-system)
   - [Rate Limiting](#rate-limiting)
   - [Worker Pool Architecture](#worker-pool-architecture)
-  - [Configuration](#configuration)
 - [Example Report](#example-report)
 - [AWS Permissions](#aws-permissions)
 - [Contributing](#contributing)
@@ -177,20 +176,20 @@ After deployment, note these outputs for use with CloudSift:
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/emptyset-io/cloudsift.git
-cd cloudsift
-
-# Build the binary
-make build
-
-# Or build for all platforms
-make build-all
+# Download latest release (replace VERSION with actual version)
+curl -L -o cloudsift https://github.com/emptyset-io/cloudsift/releases/download/vVERSION/cloudsift_linux_amd64
+chmod +x cloudsift
+sudo mv cloudsift /usr/local/bin/
 ```
 
-### Configuration
+### Usage and Configuration
 
-CloudSift can be configured using the CLI argumenmts, a YAML configuration file or environment variables. The order of importance is env > config.yaml > CLI arguments. To get started quickly, use the `init` command to create default configuration files:
+CloudSift can be configured using command-line arguments, a YAML configuration file, or environment variables. The precedence order is:
+1. Environment Variables (highest)
+2. Configuration File (config.yaml)
+3. Command-Line Arguments (lowest)
+
+To get started quickly, use the `init` command to create default configuration files:
 
 ```bash
 # Create a default config.yaml in the current directory
@@ -202,120 +201,84 @@ cloudsift init env
 # Create config files in custom locations
 cloudsift init config --output /path/to/config.yaml
 cloudsift init env --output /path/to/.env
-
-# Force overwrite existing files
-cloudsift init config --force
-cloudsift init env --force
 ```
 
-The generated files will contain all available configuration options with helpful comments explaining each setting.
+#### Listing Resources and Configurations
 
-For more details on configuration options, see the [Configuration](#configuration) section.
-
-### Basic Usage
+CloudSift provides commands to list various AWS resources and configurations:
 
 ```bash
-# List available scanners
-cloudsift list scanners
+# List available AWS credential profiles
+cloudsift list profiles
 
-# List AWS accounts in single account mode
+# List AWS accounts in single-account mode
 cloudsift list accounts
 
 # List AWS accounts in organization mode
-cloudsift list accounts --organization-role <org_role>
+cloudsift list accounts --organization-role OrganizationRole
 
-# Run a scan in single account mode
-cloudsift scan
-
-# Run a scan in organization mode with all scanners
-cloudsift scan --organization-role <org_role> --scanner-role <scanner_role>
-
-# Run specific scanners
-cloudsift scan --organization-role <org_role> --scanner-role <scanner_role> --scanners ec2,ebs,s3
-
-# Scan specific regions
-cloudsift scan --organization-role <org_role> --scanner-role <scanner_role> --regions us-west-2,us-east-1
-
-# Configure parallel scanning
-cloudsift scan --max-workers 10 --organization-role <org_role> --scanner-role <scanner_role>
+# List available resource scanners
+cloudsift list scanners
 ```
 
-## Usage
-
-### Basic Usage
+#### Command-Line Usage
 
 ```bash
-# Scan all resources in all regions
+# Basic scan of current account
 cloudsift scan
+
+# Basic scan of all accounts in organization
+cloudsift scan --organization-role OrganizationRole --scanner-role ScannerRole
 
 # Scan specific resources in specific regions
-cloudsift scan --regions us-west-2,us-east-1 --scanners ebs-volumes,ec2-instances
+cloudsift scan --scanners ebs-volumes,ec2-instances \
+               --regions us-west-2,us-east-1
 
-# Output results to S3
-cloudsift scan --output s3 --bucket my-bucket --bucket-region us-west-2
-
-# Use a specific AWS profile and roles
-cloudsift scan --profile prod --organization-role OrgRole --scanner-role ScanRole
-
-# Ignore specific resources (case-insensitive)
-cloudsift scan \
-  --ignore-resource-ids i-1234567890abcdef0,vol-0987654321fedcba \
-  --ignore-resource-names prod-server,backup-volume \
-  --ignore-tags Environment=production,KeepAlive=true
-```
-
-### Scan Command
-
-The `scan` command is used to scan AWS resources for potential cost savings. It supports scanning multiple resource types across multiple regions and accounts.
-
-```bash
-cloudsift scan [flags]
-
-# Flags:
---bucket string          # S3 bucket name (required when --output=s3)
---bucket-region string   # S3 bucket region (required when --output=s3)
---days-unused int        # Number of days a resource must be unused to be reported (default 90)
---output string          # Output type (filesystem, s3) (default "filesystem")
---output-format, -o string # Output format (json, html) (default "html")
---regions string         # Comma-separated list of regions to scan (default: all available regions)
---scanners string        # Comma-separated list of scanners to run (default: all available scanners)
---ignore-resource-ids string    # Comma-separated list of resource IDs to ignore (case-insensitive)
---ignore-resource-names string  # Comma-separated list of resource names to ignore (case-insensitive)
---ignore-tags string           # Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)
-```
-
-#### Scan Examples
-
-```bash
-# Scan all resources in all regions of current account
-cloudsift scan
-
-# Scan EBS volumes in us-west-2 of current account
-cloudsift scan --scanners ebs-volumes --regions us-west-2
-
-# Scan multiple resource types in multiple regions of all organization accounts
-cloudsift scan --scanners ebs-volumes,ebs-snapshots \
-               --regions us-west-2,us-east-1 \
-               --organization-role OrganizationAccessRole \
-               --scanner-role ScannerAccessRole
-
-# Output HTML report to S3
-cloudsift scan --output s3 --output-format html \
-               --bucket my-bucket --bucket-region us-west-2
-
-# Output JSON results to S3
-cloudsift scan --output s3 --output-format json \
-               --bucket my-bucket --bucket-region us-west-2
+# Scan organization with custom roles and S3 output
+cloudsift scan --organization-role OrganizationRole \
+               --scanner-role ScannerRole \
+               --output s3 \
+               --bucket my-bucket \
+               --bucket-region us-west-2
 
 # Ignore specific resources (case-insensitive matching)
 cloudsift scan --ignore-resource-ids i-1234567890abcdef0,vol-0987654321fedcba \
                --ignore-resource-names prod-server,backup-volume \
                --ignore-tags "Environment=production,KeepAlive=true"
+
+# Use a specific config file
+cloudsift scan -c /path/to/config.yaml
 ```
 
-### Configuration
+#### Global Command-Line Arguments
 
-CloudSift can be configured through environment variables or a configuration file. Environment variables take precedence over configuration file settings.
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-c, --config` | Path to config file | `""` |
+| `-p, --profile` | AWS profile to use | `default` |
+| `--organization-role` | Role for org access | `""` |
+| `--scanner-role` | Role for scanning | `""` |
+| `--log-format` | Log format (text/json) | `text` |
+| `--log-level` | Log level (DEBUG/INFO/WARN/ERROR) | `INFO` |
+| `--max-workers` | Maximum concurrent workers | `32` |
+
+#### Scan Command Arguments
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--profile` | AWS profile to use | `default` |
+| `--regions` | Comma-separated list of regions | All regions |
+| `--scanners` | Comma-separated list of scanners | All scanners |
+| `--output` | Output type (filesystem, s3) | `filesystem` |
+| `--output-format, -o` | Output format (json, html) | `html` |
+| `--bucket` | S3 bucket for output | `""` |
+| `--bucket-region` | S3 bucket region | `""` |
+| `--organization-role` | Role for org access | `""` |
+| `--scanner-role` | Role for scanning | `""` |
+| `--days-unused` | Days threshold for unused resources | `90` |
+| `--ignore-resource-ids` | Resource IDs to ignore | `""` |
+| `--ignore-resource-names` | Resource names to ignore | `""` |
+| `--ignore-tags` | Tags to ignore (KEY=VALUE) | `""` |
 
 #### Environment Variables
 
@@ -350,13 +313,13 @@ Example configuration file:
 
 ```yaml
 aws:
-  profile: prod
-  organization_role: OrganizationAccessRole
-  scanner_role: SecurityAuditRole
+  profile: default  # AWS profile to use (supports SSO profiles)
+  organization_role: ""  # Role name to assume for organization-wide operations
+  scanner_role: ""  # Role name to assume for scanning operations
 
 app:
-  log_format: text
-  log_level: INFO
+  log_format: text  # Log output format (text or json)
+  log_level: INFO  # Set logging level (DEBUG, INFO, WARN, ERROR)
   max_workers: 8
 
 scan:
@@ -375,20 +338,18 @@ scan:
   # Ignore list configuration (all case-insensitive)
   ignore:
     resource_ids:
-      - i-1234567890abcdef0     # Will match "I-1234567890ABCDEF0"
-      - vol-0987654321fedcba    # Will match "VOL-0987654321FEDCBA"
-    
+      - i-1234567890abcdef0
+      - vol-1234567890abcdef0
+
     resource_names:
-      - prod-server-01          # Will match "PROD-SERVER-01"
-      - backup-volume-02        # Will match "Backup-Volume-02"
-    
-    tags:                       # Both keys and values are case-insensitive
+      - my-important-instance
+      - critical-data-volume
+
+    tags:
       Environment: production   # Will match "ENVIRONMENT: PRODUCTION"
       KeepAlive: "true"        # Will match "keepalive: TRUE"
       Project: critical        # Will match "PROJECT: CRITICAL"
 ```
-
-## Documentation
 
 ### Cost Estimation System
 
