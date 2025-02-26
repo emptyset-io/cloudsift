@@ -24,7 +24,7 @@ all: clean deps fmt build
 
 .PHONY: deps
 deps:
-	$(GO) mod download
+	$(GO) mod tidy
 
 .PHONY: fmt
 fmt:
@@ -46,7 +46,7 @@ test:
 	$(GO) test -v ./...
 
 .PHONY: build
-build:
+build: deps
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)

@@ -38,6 +38,9 @@ type scanOptions struct {
 	scannerRole      string // Role to assume for scanning accounts
 	daysUnused       int    // Number of days a resource must be unused to be reported
 	profile          string // AWS profile to use
+	ignoreResourceIDs   string
+	ignoreResourceNames string
+	ignoreTags          string
 }
 
 type scannerProgress struct {
@@ -127,9 +130,52 @@ Examples:
   # Output JSON results to S3
   cloudsift scan --output s3 --output-format json --bucket my-bucket --bucket-region us-west-2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Update global config with profile if specified
-			if opts.profile != "" {
+			// Command line flags should take precedence over config and env vars
+			if cmd.Flags().Changed("profile") {
 				config.Config.Profile = opts.profile
+			}
+			if cmd.Flags().Changed("regions") {
+				config.Config.ScanRegions = opts.regions
+			}
+			if cmd.Flags().Changed("scanners") {
+				config.Config.ScanScanners = opts.scanners
+			}
+			if cmd.Flags().Changed("output") {
+				config.Config.ScanOutput = opts.output
+			}
+			if cmd.Flags().Changed("output-format") {
+				config.Config.ScanOutputFormat = opts.outputFormat
+			}
+			if cmd.Flags().Changed("bucket") {
+				config.Config.ScanBucket = opts.bucket
+			}
+			if cmd.Flags().Changed("bucket-region") {
+				config.Config.ScanBucketRegion = opts.bucketRegion
+			}
+			if cmd.Flags().Changed("organization-role") {
+				config.Config.OrganizationRole = opts.organizationRole
+			}
+			if cmd.Flags().Changed("scanner-role") {
+				config.Config.ScannerRole = opts.scannerRole
+			}
+			if cmd.Flags().Changed("days-unused") {
+				config.Config.ScanDaysUnused = opts.daysUnused
+			}
+			if cmd.Flags().Changed("ignore-resource-ids") {
+				config.Config.ScanIgnoreResourceIDs = strings.Split(opts.ignoreResourceIDs, ",")
+			}
+			if cmd.Flags().Changed("ignore-resource-names") {
+				config.Config.ScanIgnoreResourceNames = strings.Split(opts.ignoreResourceNames, ",")
+			}
+			if cmd.Flags().Changed("ignore-tags") {
+				tags := make(map[string]string)
+				for _, tag := range strings.Split(opts.ignoreTags, ",") {
+					parts := strings.SplitN(tag, "=", 2)
+					if len(parts) == 2 {
+						tags[parts[0]] = parts[1]
+					}
+				}
+				config.Config.ScanIgnoreTags = tags
 			}
 
 			// Validate output format
@@ -172,6 +218,9 @@ Examples:
 	cmd.Flags().StringVar(&opts.scannerRole, "scanner-role", "", "Role to assume for scanning accounts")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 90, "Number of days a resource must be unused to be reported")
 	cmd.Flags().StringVar(&opts.profile, "profile", "", "AWS profile to use")
+	cmd.Flags().StringVar(&opts.ignoreResourceIDs, "ignore-resource-ids", "", "Comma-separated list of resource IDs to ignore (case-insensitive)")
+	cmd.Flags().StringVar(&opts.ignoreResourceNames, "ignore-resource-names", "", "Comma-separated list of resource names to ignore (case-insensitive)")
+	cmd.Flags().StringVar(&opts.ignoreTags, "ignore-tags", "", "Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)")
 
 	return cmd
 }
@@ -485,7 +534,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						// Log completion stats if any tasks have completed
 						if metrics.CompletedTasks > 0 {
 							avgExecMs := metrics.AverageExecutionMs
-							tasksPerSec := float64(metrics.CompletedTasks) / (float64(metrics.TotalExecutionMs) / 1000.0)
+							tasksPerSec := float64(metrics.CompletedTasks) / float64(metrics.AverageExecutionMs) * 1000
 							logging.Progress(fmt.Sprintf("  Stats: %d completed, %d failed, %.1f tasks/sec, avg %.1fs per task",
 								metrics.CompletedTasks,
 								metrics.FailedTasks,
@@ -546,36 +595,99 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 						return err
 					}
 
-					// Update result count with actual number of results found
-					progressMap.updateResultCount(account.ID, logRegion, scanner.Label(), len(results))
+					// Filter results based on ignore list
+					var filteredResults awsinternal.ScanResults
+					for _, result := range results {
+						// Check if resource ID is in ignore list
+						shouldIgnore := false
+						for _, ignoreID := range config.Config.ScanIgnoreResourceIDs {
+							if strings.EqualFold(result.ResourceID, ignoreID) {
+								logging.Debug("Ignoring resource by ID", map[string]interface{}{
+									"resource_id": result.ResourceID,
+									"scanner":     scanner.Label(),
+									"account_id": account.ID,
+									"region":     logRegion,
+								})
+								shouldIgnore = true
+								break
+							}
+						}
+
+						// Check if resource name is in ignore list
+						if !shouldIgnore {
+							for _, ignoreName := range config.Config.ScanIgnoreResourceNames {
+								if strings.EqualFold(result.ResourceName, ignoreName) {
+									logging.Debug("Ignoring resource by name", map[string]interface{}{
+										"resource_name": result.ResourceName,
+										"scanner":       scanner.Label(),
+										"account_id":   account.ID,
+										"region":       logRegion,
+									})
+									shouldIgnore = true
+									break
+								}
+							}
+						}
+
+						// Check if any resource tags match ignore list
+						if !shouldIgnore && len(result.Tags) > 0 {
+							for ignoreKey, ignoreValue := range config.Config.ScanIgnoreTags {
+								// Convert tag key and value to lowercase for case-insensitive comparison
+								for tagKey, tagValue := range result.Tags {
+									if strings.EqualFold(tagKey, ignoreKey) && strings.EqualFold(tagValue, ignoreValue) {
+										logging.Debug("Ignoring resource by tag", map[string]interface{}{
+											"resource_id": result.ResourceID,
+											"tag_key":     ignoreKey,
+											"tag_value":   ignoreValue,
+											"scanner":     scanner.Label(),
+											"account_id": account.ID,
+											"region":     logRegion,
+										})
+										shouldIgnore = true
+										break
+									}
+								}
+								if shouldIgnore {
+									break
+								}
+							}
+						}
+
+						if !shouldIgnore {
+							filteredResults = append(filteredResults, result)
+						}
+					}
+
+					// Update result count with filtered results
+					progressMap.updateResultCount(account.ID, logRegion, scanner.Label(), len(filteredResults))
 
 					// Add account and region info to each result
-					for i := range results {
-						if results[i].Details == nil {
-							results[i].Details = make(map[string]interface{})
+					for i := range filteredResults {
+						if filteredResults[i].Details == nil {
+							filteredResults[i].Details = make(map[string]interface{})
 						}
-						results[i].AccountID = account.ID
-						results[i].AccountName = account.Name
+						filteredResults[i].AccountID = account.ID
+						filteredResults[i].AccountName = account.Name
 						// For IAM scanners, set region as "global", otherwise use actual region
 						if isIAMScanner(scanner) {
-							results[i].Details["region"] = "global"
+							filteredResults[i].Details["region"] = "global"
 						} else {
-							results[i].Details["region"] = region
+							filteredResults[i].Details["region"] = region
 						}
 					}
 
 					// Safely append results
 					resultsMutex.Lock()
 					if accountResults[account.ID].Results[scanner.Label()] == nil {
-						accountResults[account.ID].Results[scanner.Label()] = results
+						accountResults[account.ID].Results[scanner.Label()] = filteredResults
 					} else {
-						accountResults[account.ID].Results[scanner.Label()] = append(accountResults[account.ID].Results[scanner.Label()], results...)
+						accountResults[account.ID].Results[scanner.Label()] = append(accountResults[account.ID].Results[scanner.Label()], filteredResults...)
 					}
 					resultsMutex.Unlock()
 
 					// Log completion with results
-					resultInterfaces := make([]interface{}, len(results))
-					for i, r := range results {
+					resultInterfaces := make([]interface{}, len(filteredResults))
+					for i, r := range filteredResults {
 						resultInterfaces[i] = r
 					}
 					logging.ScannerComplete(scanner.Label(), account.ID, account.Name, logRegion, resultInterfaces)

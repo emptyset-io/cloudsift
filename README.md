@@ -34,6 +34,7 @@
   - [Cost Estimation System](#cost-estimation-system)
   - [Rate Limiting](#rate-limiting)
   - [Worker Pool Architecture](#worker-pool-architecture)
+  - [Configuration](#configuration)
 - [Example Report](#example-report)
 - [AWS Permissions](#aws-permissions)
 - [Contributing](#contributing)
@@ -187,6 +188,30 @@ make build
 make build-all
 ```
 
+### Configuration
+
+CloudSift can be configured using either a YAML configuration file or environment variables. To get started quickly, use the `init` command to create default configuration files:
+
+```bash
+# Create a default config.yaml in the current directory
+cloudsift init config
+
+# Create a default .env file in the current directory
+cloudsift init env
+
+# Create config files in custom locations
+cloudsift init config --output /path/to/config.yaml
+cloudsift init env --output /path/to/.env
+
+# Force overwrite existing files
+cloudsift init config --force
+cloudsift init env --force
+```
+
+The generated files will contain all available configuration options with helpful comments explaining each setting.
+
+For more details on configuration options, see the [Configuration](#configuration) section.
+
 ### Basic Usage
 
 ```bash
@@ -217,19 +242,26 @@ cloudsift scan --max-workers 10 --organization-role <org_role> --scanner-role <s
 
 ## Usage
 
-CloudSift provides a comprehensive command-line interface with several commands for managing and inspecting AWS resources.
-
-### Global Flags
-
-These flags are available for all commands:
+### Basic Usage
 
 ```bash
---log-format string          # Log output format (text or json) (default "text")
---log-level string          # Set logging level (DEBUG, INFO, WARN, ERROR) (default "INFO")
---max-workers int           # Maximum number of concurrent workers (default 12)
---organization-role string  # Role name to assume for organization-wide operations
---profile, -p string       # AWS profile to use (supports SSO profiles) (default "default")
---scanner-role string      # Role name to assume for scanning operations
+# Scan all resources in all regions
+cloudsift scan
+
+# Scan specific resources in specific regions
+cloudsift scan --regions us-west-2,us-east-1 --scanners ebs-volumes,ec2-instances
+
+# Output results to S3
+cloudsift scan --output s3 --bucket my-bucket --bucket-region us-west-2
+
+# Use a specific AWS profile and roles
+cloudsift scan --profile prod --organization-role OrgRole --scanner-role ScanRole
+
+# Ignore specific resources (case-insensitive)
+cloudsift scan \
+  --ignore-resource-ids i-1234567890abcdef0,vol-0987654321fedcba \
+  --ignore-resource-names prod-server,backup-volume \
+  --ignore-tags Environment=production,KeepAlive=true
 ```
 
 ### Scan Command
@@ -247,6 +279,9 @@ cloudsift scan [flags]
 --output-format, -o string # Output format (json, html) (default "html")
 --regions string         # Comma-separated list of regions to scan (default: all available regions)
 --scanners string        # Comma-separated list of scanners to run (default: all available scanners)
+--ignore-resource-ids string    # Comma-separated list of resource IDs to ignore (case-insensitive)
+--ignore-resource-names string  # Comma-separated list of resource names to ignore (case-insensitive)
+--ignore-tags string           # Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)
 ```
 
 #### Scan Examples
@@ -271,69 +306,91 @@ cloudsift scan --output s3 --output-format html \
 # Output JSON results to S3
 cloudsift scan --output s3 --output-format json \
                --bucket my-bucket --bucket-region us-west-2
+
+# Ignore specific resources (case-insensitive matching)
+cloudsift scan --ignore-resource-ids i-1234567890abcdef0,vol-0987654321fedcba \
+               --ignore-resource-names prod-server,backup-volume \
+               --ignore-tags "Environment=production,KeepAlive=true"
 ```
 
-### List Command
+### Configuration
 
-The `list` command provides information about various AWS resources and configurations.
+CloudSift can be configured through environment variables or a configuration file. Environment variables take precedence over configuration file settings.
 
-#### List Accounts
-```bash
-cloudsift list accounts [flags]
+#### Environment Variables
 
-# Examples:
-# List current account
-cloudsift list accounts
+All configuration options can be set via environment variables with the `CLOUDSIFT_` prefix:
 
-# List all accounts in organization
-cloudsift list accounts --organization-role OrganizationAccessRole
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `CLOUDSIFT_AWS_PROFILE` | AWS profile to use | `default` |
+| `CLOUDSIFT_AWS_ORGANIZATION_ROLE` | Role for organization access | `""` |
+| `CLOUDSIFT_AWS_SCANNER_ROLE` | Role for scanning accounts | `""` |
+| `CLOUDSIFT_APP_LOG_FORMAT` | Log format (text/json) | `text` |
+| `CLOUDSIFT_APP_LOG_LEVEL` | Log level (DEBUG/INFO/WARN/ERROR) | `INFO` |
+| `CLOUDSIFT_SCAN_REGIONS` | Comma-separated list of regions | `""` (all regions) |
+| `CLOUDSIFT_SCAN_SCANNERS` | Comma-separated list of scanners | `""` (all scanners) |
+| `CLOUDSIFT_SCAN_OUTPUT` | Output type (filesystem/s3) | `filesystem` |
+| `CLOUDSIFT_SCAN_OUTPUT_FORMAT` | Output format (json/html) | `html` |
+| `CLOUDSIFT_SCAN_BUCKET` | S3 bucket for output | `""` |
+| `CLOUDSIFT_SCAN_BUCKET_REGION` | S3 bucket region | `""` |
+| `CLOUDSIFT_SCAN_DAYS_UNUSED` | Days threshold for unused resources | `90` |
+| `CLOUDSIFT_SCAN_IGNORE_RESOURCE_IDS` | Resource IDs to ignore (case-insensitive) | `""` |
+| `CLOUDSIFT_SCAN_IGNORE_RESOURCE_NAMES` | Resource names to ignore (case-insensitive) | `""` |
+| `CLOUDSIFT_SCAN_IGNORE_TAGS` | Tags to ignore in KEY=VALUE format (case-insensitive) | `""` |
+
+#### Configuration File
+
+The `config.yaml` file can be placed in the following locations (in order of precedence):
+1. Current directory (`./config.yaml`)
+2. User's home directory (`$HOME/.cloudsift/config.yaml`)
+3. System-wide directory (`/etc/cloudsift/config.yaml`)
+
+Example configuration file:
+
+```yaml
+aws:
+  profile: prod
+  organization_role: OrganizationAccessRole
+  scanner_role: SecurityAuditRole
+
+app:
+  log_format: text
+  log_level: INFO
+  max_workers: 8
+
+scan:
+  regions:
+    - us-west-2
+    - us-east-1
+  scanners:
+    - ebs-volumes
+    - ec2-instances
+  output: filesystem
+  output_format: html
+  bucket: ""
+  bucket_region: ""
+  days_unused: 90
+  
+  # Ignore list configuration (all case-insensitive)
+  ignore:
+    resource_ids:
+      - i-1234567890abcdef0     # Will match "I-1234567890ABCDEF0"
+      - vol-0987654321fedcba    # Will match "VOL-0987654321FEDCBA"
+    
+    resource_names:
+      - prod-server-01          # Will match "PROD-SERVER-01"
+      - backup-volume-02        # Will match "Backup-Volume-02"
+    
+    tags:                       # Both keys and values are case-insensitive
+      Environment: production   # Will match "ENVIRONMENT: PRODUCTION"
+      KeepAlive: "true"        # Will match "keepalive: TRUE"
+      Project: critical        # Will match "PROJECT: CRITICAL"
+    
+    regions:
+      - us-west-1             # Regions to ignore
+      - eu-west-1
 ```
-
-#### List Profiles
-```bash
-cloudsift list profiles
-
-# Lists all available AWS credential profiles from the AWS credentials 
-# and config files
-```
-
-#### List Scanners
-```bash
-cloudsift list scanners
-
-# Lists all available resource scanners that can be used to scan 
-# AWS resources
-```
-
-### Version Command
-
-```bash
-cloudsift version
-
-# Displays version information including:
-# - Version number
-# - Git commit hash
-# - Build time
-# - Go version
-```
-
-### Advanced Usage
-
-1. **Multi-Account Scanning**
-   - Use `--organization-role` to specify the role for organization-wide operations
-   - Use `--scanner-role` to specify the role for scanning individual accounts
-   - When both roles are specified, all accounts in the organization will be scanned
-
-2. **Output Options**
-   - Default output is HTML format to filesystem
-   - Support for JSON output format
-   - Optional S3 output with bucket configuration
-   - Configurable unused resource threshold (default 90 days)
-
-3. **Performance Tuning**
-   - Adjust `--max-workers` for concurrent operations (default: 12)
-   - Configure logging level and format for debugging
-   - Region-specific scanning for focused analysis
 
 ## Documentation
 
