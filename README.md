@@ -360,10 +360,10 @@ app:
   max_workers: 8
 
 scan:
-  regions:
+  regions: # Leaving this list empty will scan all regions
     - us-west-2
     - us-east-1
-  scanners:
+  scanners: # Leaving this list empty will execute all scanners
     - ebs-volumes
     - ec2-instances
   output: filesystem
