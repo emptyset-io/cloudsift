@@ -190,7 +190,7 @@ make build-all
 
 ### Configuration
 
-CloudSift can be configured using either a YAML configuration file or environment variables. To get started quickly, use the `init` command to create default configuration files:
+CloudSift can be configured using the CLI argumenmts, a YAML configuration file or environment variables. The order of importance is env > config.yaml > CLI arguments. To get started quickly, use the `init` command to create default configuration files:
 
 ```bash
 # Create a default config.yaml in the current directory
