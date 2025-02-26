@@ -92,8 +92,29 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		}
 	}
 
+	// Skip if AMI is in use
+	if runningInstances > 0 {
+		return nil, nil
+	}
+
+	// Calculate age of AMI
+	creationDate, err := time.Parse(time.RFC3339, aws.StringValue(t.ami.CreationDate))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse AMI creation date: %w", err)
+	}
+
+	age := t.now.Sub(creationDate)
+	ageInDays := int(age.Hours() / 24)
+
+	// Skip if AMI is not old enough
+	if ageInDays < t.opts.DaysUnused {
+		return nil, nil
+	}
+
 	// Get snapshot details for cost calculation
 	var totalSnapshotSize int64
+	var snapshotDetails []map[string]interface{}
+
 	for _, blockDevice := range t.ami.BlockDeviceMappings {
 		if blockDevice.Ebs != nil && blockDevice.Ebs.SnapshotId != nil {
 			if err := t.rateLimiter.Wait(ctx); err != nil {
@@ -107,108 +128,102 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 				if strings.Contains(err.Error(), "Throttling:") {
 					t.rateLimiter.OnFailure()
 				}
-				logging.Error("Failed to describe snapshot", err, map[string]interface{}{
-					"snapshot_id": aws.StringValue(blockDevice.Ebs.SnapshotId),
-					"ami_id":      amiID,
-				})
-				continue
+				return nil, fmt.Errorf("failed to describe snapshot: %w", err)
 			}
 			t.rateLimiter.OnSuccess()
 
 			if len(snapshot.Snapshots) > 0 {
-				totalSnapshotSize += aws.Int64Value(snapshot.Snapshots[0].VolumeSize)
-			}
-		}
-	}
+				snapshotSize := aws.Int64Value(snapshot.Snapshots[0].VolumeSize)
+				totalSnapshotSize += snapshotSize
 
-	// Calculate age
-	var ageString string
-	if t.ami.CreationDate != nil {
-		creationTime, err := time.Parse(time.RFC3339, *t.ami.CreationDate)
-		if err == nil {
-			ageString = t.scanner.calculateAgeString(t.now, &creationTime)
+				snapshotDetails = append(snapshotDetails, map[string]interface{}{
+					"snapshot_id":   aws.StringValue(blockDevice.Ebs.SnapshotId),
+					"device_name":   aws.StringValue(blockDevice.DeviceName),
+					"volume_size":   snapshotSize,
+					"volume_type":   aws.StringValue(blockDevice.Ebs.VolumeType),
+					"creation_date": aws.TimeValue(snapshot.Snapshots[0].StartTime),
+				})
+			}
 		}
 	}
 
 	// Calculate costs using the cost estimator
+	costEstimator := awslib.DefaultCostEstimator
 	var costs *awslib.CostBreakdown
-	costStart := time.Now()
-	var hoursRunning float64
-	if t.ami.CreationDate != nil {
-		if creationTime, err := time.Parse(time.RFC3339, *t.ami.CreationDate); err == nil {
-			hoursRunning = t.now.Sub(creationTime).Hours()
-			costConfig := awslib.ResourceCostConfig{
-				ResourceType:  "EBSSnapshots",  // AMIs are backed by EBS snapshots
-				ResourceSize: totalSnapshotSize,
-				Region:      t.region,
-				CreationTime: creationTime,
-			}
-			
-			costs, err = awslib.DefaultCostEstimator.CalculateCost(costConfig)
-			if err != nil {
-				logging.Error("Failed to calculate costs", err, map[string]interface{}{
-					"ami_id":     amiID,
-					"ami_name":   amiName,
-					"account_id": t.accountID,
-					"region":     t.region,
-				})
-			} else {
-				logging.Debug("Calculated AMI costs", map[string]interface{}{
-					"ami_id":       amiID,
-					"monthly_cost": costs.MonthlyRate,
-					"duration_ms":  time.Since(costStart).Milliseconds(),
-				})
+	if costEstimator != nil {
+		costStart := time.Now()
+		hoursRunning := t.now.Sub(creationDate).Hours()
 
-				// Calculate lifetime cost
-				lifetime := costs.HourlyRate * hoursRunning
-				costs.Lifetime = &lifetime
-			}
+		costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
+			ResourceType:  "EBSSnapshots",
+			ResourceSize: totalSnapshotSize,
+			Region:       t.opts.Region,
+			CreationTime: creationDate,
+		})
+		if err != nil {
+			logging.Error("Failed to calculate costs", err, map[string]interface{}{
+				"account_id":    t.accountID,
+				"region":        t.opts.Region,
+				"resource_name": amiName,
+				"resource_id":   amiID,
+				"duration_ms":   time.Since(costStart).Milliseconds(),
+			})
+		} else {
+			logging.Debug("Cost calculation completed", map[string]interface{}{
+				"resource_id": amiID,
+				"duration_ms": time.Since(costStart).Milliseconds(),
+			})
+
+			// Calculate lifetime cost
+			lifetime := costs.HourlyRate * hoursRunning
+			costs.Lifetime = &lifetime
 		}
 	}
 
-	// Determine if AMI is unused based on criteria
-	var reasons []string
-
-	// Check if no instances are using it
-	if runningInstances == 0 {
-		reasons = append(reasons, "No running instances are using this AMI")
+	// Convert AWS tags to map
+	tags := make(map[string]string)
+	for _, tag := range t.ami.Tags {
+		tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
 	}
 
-	// Only add age as a reason if we already have another reason
-	if len(reasons) > 0 && t.ami.CreationDate != nil {
-		creationTime, err := time.Parse(time.RFC3339, *t.ami.CreationDate)
-		if err == nil {
-			daysOld := int(t.now.Sub(creationTime).Hours() / 24)
-			if daysOld >= t.opts.DaysUnused {
-				reasons = append(reasons,
-					fmt.Sprintf("AMI is older than %d days (age: %d days)", t.opts.DaysUnused, daysOld))
-			}
-		}
+	details := map[string]interface{}{
+		"ami": map[string]interface{}{
+			"id":            amiID,
+			"name":          amiName,
+			"creation_date": creationDate,
+			"description":   aws.StringValue(t.ami.Description),
+			"platform":      aws.StringValue(t.ami.Platform),
+			"architecture":  aws.StringValue(t.ami.Architecture),
+			"state":         aws.StringValue(t.ami.State),
+			"root_device":   aws.StringValue(t.ami.RootDeviceName),
+			"age_days":      ageInDays,
+		},
+		"snapshots": snapshotDetails,
+		"total_snapshot_size_gb": totalSnapshotSize,
 	}
 
-	// If we found reasons it's unused, create a scan result
-	if len(reasons) > 0 {
-		result := &awslib.ScanResult{
-			ResourceType: t.scanner.Label(),
-			ResourceName: amiName,
-			ResourceID:   amiID,
-			AccountID:    t.accountID,
-			Reason:       reasons[0],
-			Details: map[string]interface{}{
-				"snapshot_size_gb":    totalSnapshotSize,
-				"running_instances":   runningInstances,
-				"age":                ageString,
-				"unused_reasons":      reasons,
-				"hours_running":       hoursRunning,
-			},
-			Cost: map[string]interface{}{
-				"total": costs,
-			},
-		}
-		return result, nil
+	// Get resource name from tags or use AMI name/ID
+	resourceName := amiName
+	if resourceName == "" {
+		resourceName = amiID
+	}
+	if name, ok := tags["Name"]; ok {
+		resourceName = name
 	}
 
-	return nil, nil
+	reason := fmt.Sprintf("AMI has not been used by any instances for %d days and has %.2f GB in associated snapshots", 
+		ageInDays, float64(totalSnapshotSize))
+
+	return &awslib.ScanResult{
+		ResourceType: t.scanner.Label(),
+		ResourceName: resourceName,
+		ResourceID:   amiID,
+		AccountID:    t.accountID,
+		Reason:       reason,
+		Tags:         tags,
+		Details:      details,
+		Cost:         map[string]interface{}{"total": costs},
+	}, nil
 }
 
 // calculateAgeString formats the time difference between now and a given time
