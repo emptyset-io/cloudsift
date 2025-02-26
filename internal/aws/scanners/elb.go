@@ -126,7 +126,7 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 	case *elbv2.LoadBalancer:
 		lbARN := aws.StringValue(v.LoadBalancerArn)
 		dimensionName = "LoadBalancer"
-		
+
 		if strings.Contains(lbARN, "app/") {
 			namespace = "AWS/ApplicationELB"
 			requestMetric = "RequestCount"

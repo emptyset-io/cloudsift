@@ -52,13 +52,13 @@ const (
 
 // Config holds output configuration
 type Config struct {
-	Type            Type
-	S3Bucket        string
-	S3Region        string
-	OutputDir       string
-	Retry           *RetryConfig
-	Upload          *UploadConfig
-	Region          string
+	Type             Type
+	S3Bucket         string
+	S3Region         string
+	OutputDir        string
+	Retry            *RetryConfig
+	Upload           *UploadConfig
+	Region           string
 	OrganizationRole string // Role to assume for S3 operations
 }
 
@@ -293,8 +293,8 @@ func (w *Writer) writeToS3(path string, data []byte) error {
 	// Upload the file with server-side encryption
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket:               aws.String(w.config.S3Bucket),
-		Key:                 aws.String(path),
-		Body:                reader,
+		Key:                  aws.String(path),
+		Body:                 reader,
 		ServerSideEncryption: aws.String("aws:kms"),
 	})
 

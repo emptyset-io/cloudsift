@@ -12,6 +12,7 @@ import (
 	"cloudsift/internal/logging"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // Execute adds all child commands to the root command and sets flags appropriately
@@ -23,39 +24,70 @@ func Execute() error {
 		Short: "CloudSift - AWS resource management tool",
 		Long: `CloudSift is a command-line tool for managing and inspecting AWS resources.
 It provides a simple interface for common AWS tasks and operations.`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip config initialization for certain commands
 			if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" {
-				return
+				return nil
 			}
 
 			// Check if we should enable logging
 			shouldLog := false
-			if cmd.Parent() != nil && (cmd.Parent().Name() == "scan" || cmd.Parent().Name() == "list") {
+			if cmd.Name() == "scan" || cmd.Name() == "list" || (cmd.Parent() != nil && (cmd.Parent().Name() == "scan" || cmd.Parent().Name() == "list")) {
 				shouldLog = true
-			}
-
-			// Initialize config
-			if err := config.InitConfig(shouldLog); err != nil {
-				return
 			}
 
 			// Set config file if specified
 			if configFile != "" {
 				if err := config.SetConfigFile(configFile); err != nil {
-					// Don't use logging here as it might not be initialized yet
-					return
+					return err
 				}
 			}
 
-			// Only configure logging for scan and list commands
+			// First bind global flags to viper
+			if err := viper.BindPFlag("aws.profile", cmd.Root().PersistentFlags().Lookup("profile")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("aws.organization_role", cmd.Root().PersistentFlags().Lookup("organization-role")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("aws.scanner_role", cmd.Root().PersistentFlags().Lookup("scanner-role")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("app.max_workers", cmd.Root().PersistentFlags().Lookup("max-workers")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("app.log_format", cmd.Root().PersistentFlags().Lookup("log-format")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("app.log_level", cmd.Root().PersistentFlags().Lookup("log-level")); err != nil {
+				return err
+			}
+
+			// Then initialize config to set defaults
+			if err := config.InitConfig(shouldLog, cmd); err != nil {
+				return err
+			}
+
+			// Update config struct with values from viper
+			config.Config.Profile = viper.GetString("aws.profile")
+			config.Config.OrganizationRole = viper.GetString("aws.organization_role")
+			config.Config.ScannerRole = viper.GetString("aws.scanner_role")
+			config.Config.MaxWorkers = viper.GetInt("app.max_workers")
+			config.Config.LogFormat = viper.GetString("app.log_format")
+			config.Config.LogLevel = viper.GetString("app.log_level")
+
+			// Log configuration sources if logging is enabled
+			if shouldLog {
+				config.LogConfigurationSources(shouldLog, cmd)
+			}
+
+			// Configure logging for scan and list commands
 			if shouldLog {
 				logFormat := logging.Text
 				if config.Config.LogFormat == "json" {
 					logFormat = logging.JSON
 				}
 
-				// Parse log level
 				level := logging.INFO
 				switch strings.ToUpper(config.Config.LogLevel) {
 				case "DEBUG":
@@ -68,12 +100,14 @@ It provides a simple interface for common AWS tasks and operations.`,
 					level = logging.ERROR
 				}
 
-				// Initialize logging
+				// Configure logging with settings
 				logging.Configure(logging.LogConfig{
 					Level:  level,
 					Format: logFormat,
 				})
 			}
+
+			return nil
 		},
 	}
 

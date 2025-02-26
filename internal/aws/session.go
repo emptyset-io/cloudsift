@@ -174,7 +174,7 @@ func NewSession(profile string, region string) (*session.Session, error) {
 	// Create session options with profile
 	opts := session.Options{
 		Config:            *cfg,
-		Profile:          profile,
+		Profile:           profile,
 		SharedConfigState: session.SharedConfigEnable,
 	}
 

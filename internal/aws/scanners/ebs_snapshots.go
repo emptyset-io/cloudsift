@@ -62,8 +62,8 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	})
 
 	input := &ec2.DescribeSnapshotsInput{
-		OwnerIds: []*string{aws.String("self")}, // Only get snapshots owned by this account
-		MaxResults: nil, // Ensure we don't limit results per page
+		OwnerIds:   []*string{aws.String("self")}, // Only get snapshots owned by this account
+		MaxResults: nil,                           // Ensure we don't limit results per page
 	}
 
 	var results awslib.ScanResults
@@ -82,9 +82,9 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		snapshotsToProcess := make([]*ec2.Snapshot, 0)
 
 		logging.Debug("Processing snapshot page", map[string]interface{}{
-			"account_id":     accountID,
-			"region":        opts.Region,
-			"page_size":     len(page.Snapshots),
+			"account_id":   accountID,
+			"region":       opts.Region,
+			"page_size":    len(page.Snapshots),
 			"is_last_page": lastPage,
 		})
 
@@ -133,7 +133,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						"error":      err.Error(),
 					})
 				}
-				
+
 				// Process any volumes we did find
 				if volumeOutput != nil {
 					for _, vol := range volumeOutput.Volumes {
@@ -299,12 +299,12 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	// Log performance metrics
 	logging.Debug("EBS snapshot scan completed", map[string]interface{}{
-		"account_id":        accountID,
-		"region":            opts.Region,
-		"duration_ms":       time.Since(scanStart).Milliseconds(),
+		"account_id":          accountID,
+		"region":              opts.Region,
+		"duration_ms":         time.Since(scanStart).Milliseconds(),
 		"snapshots_processed": snapshotsProcessed,
-		"volume_lookups":     volumeLookups,
-		"cost_calculations":  costCalculations,
+		"volume_lookups":      volumeLookups,
+		"cost_calculations":   costCalculations,
 	})
 
 	return results, nil

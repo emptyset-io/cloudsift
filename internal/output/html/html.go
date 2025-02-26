@@ -33,17 +33,17 @@ type TemplateData struct {
 
 // ScanMetrics represents metrics about the scan operation
 type ScanMetrics struct {
-	TotalScans          int       `json:"total_scans"`
-	CompletedScans      int64     `json:"completed_scans"`
-	FailedScans         int64     `json:"failed_scans"`
-	AvgScansPerSecond   float64   `json:"avg_scans_per_second"`
-	TotalRunTime        float64   `json:"total_run_time"`
-	CompletedAt         time.Time `json:"completed_at"`
-	PeakWorkers         int64     `json:"peak_workers"`
-	MaxWorkers          int       `json:"max_workers"`
-	WorkerUtilization   float64   `json:"worker_utilization"`
-	AvgExecutionTimeMs  int64     `json:"avg_execution_time_ms"`
-	TasksPerSecond      float64   `json:"tasks_per_second"`
+	TotalScans         int       `json:"total_scans"`
+	CompletedScans     int64     `json:"completed_scans"`
+	FailedScans        int64     `json:"failed_scans"`
+	AvgScansPerSecond  float64   `json:"avg_scans_per_second"`
+	TotalRunTime       float64   `json:"total_run_time"`
+	CompletedAt        time.Time `json:"completed_at"`
+	PeakWorkers        int64     `json:"peak_workers"`
+	MaxWorkers         int       `json:"max_workers"`
+	WorkerUtilization  float64   `json:"worker_utilization"`
+	AvgExecutionTimeMs int64     `json:"avg_execution_time_ms"`
+	TasksPerSecond     float64   `json:"tasks_per_second"`
 }
 
 // Resource represents a single resource in the scan results

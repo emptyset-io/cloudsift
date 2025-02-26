@@ -260,7 +260,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	// Log scan completion with metrics
 	scanDuration := time.Since(startTime)
 	logging.Info("Completed EBS volume scan", map[string]interface{}{
-		"account_id":         accountID,
+		"account_id":        accountID,
 		"region":            opts.Region,
 		"total_volumes":     totalVolumes,
 		"unused_volumes":    len(results),

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cloudsift/internal/logging"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -25,36 +26,74 @@ type parameterSource struct {
 	Source string
 }
 
-// getParameterSource determines where a parameter value came from (config file, env var, or flag)
-func getParameterSource(key string) parameterSource {
+// getParameterSource determines where a parameter value came from (config file, env var, flag, or default)
+func getParameterSource(key string, cmd *cobra.Command) parameterSource {
 	flagValue := viper.Get(key)
 	envKey := "CLOUDSIFT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-	
-	// Check if value is set by flag
-	if viper.IsSet(key) && viper.GetViper().InConfig(key) {
-		return parameterSource{key, flagValue, "config"}
+
+	// Map config keys to flag names
+	flagNames := map[string]string{
+		"aws.profile":          "profile",
+		"aws.organization_role": "organization-role",
+		"aws.scanner_role":     "scanner-role",
+		"app.max_workers":      "max-workers",
+		"app.log_format":       "log-format",
+		"app.log_level":        "log-level",
+		"scan.regions":         "regions",
+		"scan.scanners":        "scanners",
+		"scan.output":          "output",
+		"scan.output_format":   "output-format",
+		"scan.bucket":          "bucket",
+		"scan.bucket_region":   "bucket-region",
+		"scan.days_unused":     "days-unused",
 	}
-	
+
+	// Get the flag name from the map, or convert the key if not found
+	flagName := flagNames[key]
+	if flagName == "" {
+		// Fall back to converting the key if not in the map
+		flagName = strings.Replace(key, ".", "-", -1)
+	}
+
+	// Check if flag was set on command line - check both local and persistent flags
+	if cmd != nil {
+		// Check local flags first
+		if f := cmd.Flags().Lookup(flagName); f != nil && f.Changed {
+			return parameterSource{key, flagValue, "command line flag"}
+		}
+
+		// Walk up the command chain checking persistent flags
+		current := cmd
+		for current != nil {
+			if f := current.PersistentFlags().Lookup(flagName); f != nil && f.Changed {
+				return parameterSource{key, flagValue, "command line flag"}
+			}
+			current = current.Parent()
+		}
+	}
+
 	// Check if value is set by environment variable
 	if _, exists := os.LookupEnv(envKey); exists {
-		return parameterSource{key, flagValue, "environment"}
+		return parameterSource{key, flagValue, "environment variable"}
 	}
-	
-	// If value is set but not in config or env, it must be from flag
-	if viper.IsSet(key) {
-		return parameterSource{key, flagValue, "flag"}
+
+	// Check if value is set in config file
+	if viper.GetViper().InConfig(key) {
+		return parameterSource{key, flagValue, "config file"}
 	}
-	
+
 	// Value is using default
-	return parameterSource{key, flagValue, "default"}
+	return parameterSource{key, flagValue, "default value"}
 }
 
-// logConfigurationSources logs the source of each configuration parameter
-func logConfigurationSources(shouldLog bool) {
+// LogConfigurationSources logs the source of each configuration parameter
+func LogConfigurationSources(shouldLog bool, cmd *cobra.Command) {
 	if !shouldLog {
 		return
 	}
 
+	logging.Debug("Configuration parameter sources:", nil)
+	
 	// List of all configuration parameters to check
 	params := []string{
 		"aws.profile",
@@ -70,51 +109,45 @@ func logConfigurationSources(shouldLog bool) {
 		"scan.bucket",
 		"scan.bucket_region",
 		"scan.days_unused",
-		"scan.ignore.resource_ids",
-		"scan.ignore.resource_names",
-		"scan.ignore.tags",
 	}
 
-	// Group parameters by their source
-	sourceMap := make(map[string][]parameterSource)
+	// Log the source of each parameter
 	for _, param := range params {
-		source := getParameterSource(param)
-		if source.Value != nil && source.Value != "" {
-			sourceMap[source.Source] = append(sourceMap[source.Source], source)
-		}
-	}
-
-	// Log parameters grouped by source
-	sources := []string{"flag", "environment", "config", "default"}
-	for _, source := range sources {
-		if params, ok := sourceMap[source]; ok {
-			values := make(map[string]interface{})
-			for _, p := range params {
-				values[p.Key] = p.Value
-			}
-			if len(values) > 0 {
-				logging.Info(fmt.Sprintf("Parameters from %s:", source), values)
-			}
-		}
+		source := getParameterSource(param, cmd)
+		logging.Debug(fmt.Sprintf("  %s = %v (from %s)", source.Key, source.Value, source.Source), nil)
 	}
 }
 
 // InitConfig initializes the Viper configuration
-func InitConfig(shouldLog bool) error {
+func InitConfig(shouldLog bool, cmd *cobra.Command) error {
 	// Set config name and type
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 
 	// Add config search paths
-	viper.AddConfigPath(".")                                // Current directory
-	viper.AddConfigPath("$HOME/.cloudsift")                // Home directory
-	viper.AddConfigPath("/etc/cloudsift/")                 // System-wide directory
-	
+	viper.AddConfigPath(".") // Current directory only
+
 	// Set environment variable prefix
 	viper.SetEnvPrefix("CLOUDSIFT")
 	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
-	// Read config file
+	// Set defaults for all configuration values
+	viper.SetDefault("aws.profile", "default")
+	viper.SetDefault("aws.organization_role", "")
+	viper.SetDefault("aws.scanner_role", "")
+	viper.SetDefault("app.max_workers", 8)
+	viper.SetDefault("app.log_format", "text")
+	viper.SetDefault("app.log_level", "INFO")
+	viper.SetDefault("scan.regions", "")
+	viper.SetDefault("scan.scanners", "")
+	viper.SetDefault("scan.output", "filesystem")
+	viper.SetDefault("scan.output_format", "html")
+	viper.SetDefault("scan.bucket", "")
+	viper.SetDefault("scan.bucket_region", "")
+	viper.SetDefault("scan.days_unused", 90)
+
+	// Try to read config file but don't error if not found
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			// Only return error if it's not a missing config file
@@ -130,52 +163,6 @@ func InitConfig(shouldLog bool) error {
 		})
 	}
 
-	// Set defaults for all configuration values
-	viper.SetDefault("aws.profile", "default")
-	viper.SetDefault("aws.organization_role", "")
-	viper.SetDefault("aws.scanner_role", "")
-	viper.SetDefault("app.max_workers", 8)
-	viper.SetDefault("app.log_format", "text")
-	viper.SetDefault("app.log_level", "INFO")
-	viper.SetDefault("list.format", "text")
-
-	// Scan command defaults
-	viper.SetDefault("scan.regions", []string{})
-	viper.SetDefault("scan.scanners", []string{})
-	viper.SetDefault("scan.output", "filesystem")
-	viper.SetDefault("scan.output_format", "html")
-	viper.SetDefault("scan.bucket", "")
-	viper.SetDefault("scan.bucket_region", "")
-	viper.SetDefault("scan.days_unused", 90)
-	viper.SetDefault("scan.ignore.resource_ids", []string{})
-	viper.SetDefault("scan.ignore.resource_names", []string{})
-	viper.SetDefault("scan.ignore.tags", map[string]string{})
-
-	// Replace - with _ in environment variables
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-
-	// Log configuration sources only for scan and list commands
-	logConfigurationSources(shouldLog)
-
-	// Update config struct
-	Config.Profile = viper.GetString("aws.profile")
-	Config.OrganizationRole = viper.GetString("aws.organization_role")
-	Config.ScannerRole = viper.GetString("aws.scanner_role")
-	Config.MaxWorkers = viper.GetInt("app.max_workers")
-	Config.LogFormat = viper.GetString("app.log_format")
-
-	// Convert YAML lists to comma-separated strings
-	Config.ScanRegions = convertSliceToString(viper.GetStringSlice("scan.regions"))
-	Config.ScanScanners = convertSliceToString(viper.GetStringSlice("scan.scanners"))
-	Config.ScanOutput = viper.GetString("scan.output")
-	Config.ScanOutputFormat = viper.GetString("scan.output_format")
-	Config.ScanBucket = viper.GetString("scan.bucket")
-	Config.ScanBucketRegion = viper.GetString("scan.bucket_region")
-	Config.ScanDaysUnused = viper.GetInt("scan.days_unused")
-	Config.ScanIgnoreResourceIDs = viper.GetStringSlice("scan.ignore.resource_ids")
-	Config.ScanIgnoreResourceNames = viper.GetStringSlice("scan.ignore.resource_names")
-	Config.ScanIgnoreTags = viper.GetStringMapString("scan.ignore.tags")
-
 	return nil
 }
 
@@ -188,23 +175,6 @@ func SetConfigFile(configFile string) error {
 	if err := viper.ReadInConfig(); err != nil {
 		return fmt.Errorf("error reading config file: %w", err)
 	}
-
-	// Update config struct with new values
-	Config.Profile = viper.GetString("aws.profile")
-	Config.OrganizationRole = viper.GetString("aws.organization_role")
-	Config.ScannerRole = viper.GetString("aws.scanner_role")
-	Config.MaxWorkers = viper.GetInt("app.max_workers")
-	Config.LogFormat = viper.GetString("app.log_format")
-	Config.ScanRegions = convertSliceToString(viper.GetStringSlice("scan.regions"))
-	Config.ScanScanners = convertSliceToString(viper.GetStringSlice("scan.scanners"))
-	Config.ScanOutput = viper.GetString("scan.output")
-	Config.ScanOutputFormat = viper.GetString("scan.output_format")
-	Config.ScanBucket = viper.GetString("scan.bucket")
-	Config.ScanBucketRegion = viper.GetString("scan.bucket_region")
-	Config.ScanDaysUnused = viper.GetInt("scan.days_unused")
-	Config.ScanIgnoreResourceIDs = viper.GetStringSlice("scan.ignore.resource_ids")
-	Config.ScanIgnoreResourceNames = viper.GetStringSlice("scan.ignore.resource_names")
-	Config.ScanIgnoreTags = viper.GetStringMapString("scan.ignore.tags")
 
 	return nil
 }
@@ -237,10 +207,6 @@ app:
   log_format: text  # Log output format (text or json)
   log_level: INFO  # Set logging level (DEBUG, INFO, WARN, ERROR)
 
-# List Command Configuration
-list:
-  format: text  # Output format for list commands (text or json)
-
 # Scan Command Configuration
 scan:
   # List of regions to scan (default: all available regions)
@@ -256,10 +222,6 @@ scan:
   bucket: ""  # S3 bucket name (required when output=s3)
   bucket_region: ""  # S3 bucket region (required when output=s3)
   days_unused: 90  # Number of days a resource must be unused to be reported
-  ignore:
-    resource_ids: []  # List of resource IDs to ignore
-    resource_names: []  # List of resource names to ignore
-    tags: {}  # Map of tags to ignore (key=value)
 `)
 		if err := os.WriteFile(configPath, defaultConfig, 0644); err != nil {
 			return fmt.Errorf("error writing default config file: %w", err)

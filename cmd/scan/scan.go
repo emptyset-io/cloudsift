@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	awsinternal "cloudsift/internal/aws"
 	"cloudsift/internal/config"
@@ -28,16 +29,15 @@ import (
 )
 
 type scanOptions struct {
-	regions          string
-	scanners         string
-	output           string // filesystem or s3
-	outputFormat     string // html or json
-	bucket           string
-	bucketRegion     string
-	organizationRole string // Role to assume for listing organization accounts
-	scannerRole      string // Role to assume for scanning accounts
-	daysUnused       int    // Number of days a resource must be unused to be reported
-	profile          string // AWS profile to use
+	regions             string
+	scanners            string
+	output              string // filesystem or s3
+	outputFormat        string // html or json
+	bucket              string
+	bucketRegion        string
+	organizationRole    string // Role to assume for listing organization accounts
+	scannerRole         string // Role to assume for scanning accounts
+	daysUnused          int    // Number of days a resource must be unused to be reported
 	ignoreResourceIDs   string
 	ignoreResourceNames string
 	ignoreTags          string
@@ -131,9 +131,6 @@ Examples:
   cloudsift scan --output s3 --output-format json --bucket my-bucket --bucket-region us-west-2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Command line flags should take precedence over config and env vars
-			if cmd.Flags().Changed("profile") {
-				config.Config.Profile = opts.profile
-			}
 			if cmd.Flags().Changed("regions") {
 				config.Config.ScanRegions = opts.regions
 			}
@@ -178,6 +175,41 @@ Examples:
 				config.Config.ScanIgnoreTags = tags
 			}
 
+			// Bind scan-specific flags to viper
+			if err := viper.BindPFlag("scan.regions", cmd.Flags().Lookup("regions")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.scanners", cmd.Flags().Lookup("scanners")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.output", cmd.Flags().Lookup("output")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.output_format", cmd.Flags().Lookup("output-format")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.bucket", cmd.Flags().Lookup("bucket")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.bucket_region", cmd.Flags().Lookup("bucket-region")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.days_unused", cmd.Flags().Lookup("days-unused")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.ignore.resource_ids", cmd.Flags().Lookup("ignore-resource-ids")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.ignore.resource_names", cmd.Flags().Lookup("ignore-resource-names")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.ignore.tags", cmd.Flags().Lookup("ignore-tags")); err != nil {
+				return err
+			}
+
+			// Log configuration sources after binding all flags
+			config.LogConfigurationSources(true, cmd)
+
 			// Validate output format
 			switch opts.outputFormat {
 			case "json", "html":
@@ -217,7 +249,6 @@ Examples:
 	cmd.Flags().StringVar(&opts.organizationRole, "organization-role", "", "Role to assume for listing organization accounts")
 	cmd.Flags().StringVar(&opts.scannerRole, "scanner-role", "", "Role to assume for scanning accounts")
 	cmd.Flags().IntVar(&opts.daysUnused, "days-unused", 90, "Number of days a resource must be unused to be reported")
-	cmd.Flags().StringVar(&opts.profile, "profile", "", "AWS profile to use")
 	cmd.Flags().StringVar(&opts.ignoreResourceIDs, "ignore-resource-ids", "", "Comma-separated list of resource IDs to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreResourceNames, "ignore-resource-names", "", "Comma-separated list of resource names to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreTags, "ignore-tags", "", "Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)")
@@ -605,8 +636,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 								logging.Debug("Ignoring resource by ID", map[string]interface{}{
 									"resource_id": result.ResourceID,
 									"scanner":     scanner.Label(),
-									"account_id": account.ID,
-									"region":     logRegion,
+									"account_id":  account.ID,
+									"region":      logRegion,
 								})
 								shouldIgnore = true
 								break
@@ -620,8 +651,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 									logging.Debug("Ignoring resource by name", map[string]interface{}{
 										"resource_name": result.ResourceName,
 										"scanner":       scanner.Label(),
-										"account_id":   account.ID,
-										"region":       logRegion,
+										"account_id":    account.ID,
+										"region":        logRegion,
 									})
 									shouldIgnore = true
 									break
@@ -640,8 +671,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 											"tag_key":     ignoreKey,
 											"tag_value":   ignoreValue,
 											"scanner":     scanner.Label(),
-											"account_id": account.ID,
-											"region":     logRegion,
+											"account_id":  account.ID,
+											"region":      logRegion,
 										})
 										shouldIgnore = true
 										break
@@ -906,8 +937,8 @@ func validateS3Access(bucket, region string, orgRole string) error {
 	// Try to upload a test file with required encryption
 	_, err = s3Client.PutObject(&s3.PutObjectInput{
 		Bucket:               aws.String(bucket),
-		Key:                 aws.String(testKey),
-		Body:                bytes.NewReader([]byte("test")),
+		Key:                  aws.String(testKey),
+		Body:                 bytes.NewReader([]byte("test")),
 		ServerSideEncryption: aws.String("aws:kms"),
 	})
 	if err != nil {
