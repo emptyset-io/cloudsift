@@ -89,8 +89,13 @@ func (rl *RateLimiter) Wait(ctx context.Context) error {
 	// Check and apply backoff if needed
 	backoff := rl.getCurrentBackoff()
 	if backoff > 0 {
-		logging.Debug("Rate limiter applying backoff", map[string]interface{}{
-			"backoff_ms": backoff.Milliseconds(),
+		// Temporary debug to check log level
+		logging.Info("TEMP: Rate limiter applying backoff", map[string]interface{}{
+			"backoff_ms":     backoff.Milliseconds(),
+			"failure_count":  rl.failureCount,
+			"last_failure":   rl.lastFailure.Format(time.RFC3339),
+			"base_delay_ms":  rl.baseDelay.Milliseconds(),
+			"max_delay_ms":   rl.maxDelay.Milliseconds(),
 		})
 		select {
 		case <-ctx.Done():
@@ -99,7 +104,7 @@ func (rl *RateLimiter) Wait(ctx context.Context) error {
 		}
 	}
 
-	// Wait for a token
+	// Wait for token
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -113,16 +118,14 @@ func (rl *RateLimiter) OnSuccess() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	// Reset failure count after consistent success
-	if rl.failureCount > 0 && time.Since(rl.lastFailure) > time.Minute {
-		prevCount := rl.failureCount
-		rl.failureCount = 0
-		rl.backoffResetAt = time.Now()
-
-		logging.Debug("Rate limiter backoff reset", map[string]interface{}{
-			"previous_failures":     prevCount,
-			"time_since_failure_ms": time.Since(rl.lastFailure).Milliseconds(),
+	// Reset failure count after consecutive successes
+	if rl.failureCount > 0 {
+		logging.Debug("Rate limiter resetting backoff after success", map[string]interface{}{
+			"previous_failure_count": rl.failureCount,
+			"last_failure":          rl.lastFailure.Format(time.RFC3339),
 		})
+		rl.failureCount = 0
+		rl.lastFailure = time.Time{}
 	}
 }
 
@@ -134,14 +137,35 @@ func (rl *RateLimiter) OnFailure() {
 	rl.failureCount++
 	rl.lastFailure = time.Now()
 
-	// Cap failure count at maxRetries
-	if rl.failureCount > rl.maxRetries {
-		rl.failureCount = rl.maxRetries
+	logging.Debug("Rate limiter recorded failure", map[string]interface{}{
+		"failure_count":    rl.failureCount,
+		"last_failure":     rl.lastFailure.Format(time.RFC3339),
+		"next_backoff_ms": float64(rl.baseDelay) * math.Pow(2, float64(rl.failureCount-1)),
+	})
+}
+
+// RateLimiterRegistry manages rate limiters per account/region
+type RateLimiterRegistry struct {
+	limiters sync.Map
+}
+
+var (
+	// Global registry instance
+	globalRegistry = &RateLimiterRegistry{}
+)
+
+// GetRateLimiter gets or creates a rate limiter for the given key
+func (r *RateLimiterRegistry) GetRateLimiter(key string, cfg *config.RateLimitConfig) *RateLimiter {
+	if limiter, ok := r.limiters.Load(key); ok {
+		return limiter.(*RateLimiter)
 	}
 
-	// Log backoff state
-	logging.Debug("Rate limiter backoff triggered", map[string]interface{}{
-		"failure_count": rl.failureCount,
-		"backoff_ms":    rl.getCurrentBackoff().Milliseconds(),
-	})
+	limiter := NewRateLimiter(cfg)
+	actual, _ := r.limiters.LoadOrStore(key, limiter)
+	return actual.(*RateLimiter)
+}
+
+// GetGlobalRegistry returns the global rate limiter registry
+func GetGlobalRegistry() *RateLimiterRegistry {
+	return globalRegistry
 }

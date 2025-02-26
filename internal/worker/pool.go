@@ -169,8 +169,8 @@ func (p *Pool) worker() {
 
 			// Create a child context for the task that is cancelled when either:
 			// 1. The pool is stopping (p.ctx is cancelled)
-			// 2. The task times out (30 second timeout)
-			taskCtx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+			// 2. The task times out (3 minute timeout to accommodate rate limiting backoff)
+			taskCtx, cancel := context.WithTimeout(p.ctx, 3*time.Minute)
 			err := task(taskCtx)
 			cancel()
 
@@ -195,7 +195,7 @@ func (p *Pool) worker() {
 						return
 					}
 					// Create a new timeout context since pool context is already cancelled
-					taskCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					taskCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 					if err := task(taskCtx); err != nil {
 						atomic.AddInt64(&p.metrics.FailedTasks, 1)
 					}
