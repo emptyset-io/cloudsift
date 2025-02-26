@@ -114,6 +114,9 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 	// Get snapshot details for cost calculation
 	var totalSnapshotSize int64
 	var snapshotDetails []map[string]interface{}
+	var totalCosts *awslib.CostBreakdown
+	costEstimator := awslib.DefaultCostEstimator
+	costStart := time.Now()
 
 	for _, blockDevice := range t.ami.BlockDeviceMappings {
 		if blockDevice.Ebs != nil && blockDevice.Ebs.SnapshotId != nil {
@@ -135,49 +138,63 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 			if len(snapshot.Snapshots) > 0 {
 				snapshotSize := aws.Int64Value(snapshot.Snapshots[0].VolumeSize)
 				totalSnapshotSize += snapshotSize
+				volumeType := aws.StringValue(blockDevice.Ebs.VolumeType)
+				if volumeType == "" {
+					volumeType = "gp2" // Default to gp2 if not specified
+				}
+
+				// Calculate cost for this snapshot
+				if costEstimator != nil {
+					costs, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
+						ResourceType:  "EBSSnapshots",
+						ResourceSize: snapshotSize,
+						Region:       t.opts.Region,
+						CreationTime: aws.TimeValue(snapshot.Snapshots[0].StartTime),
+						VolumeType:   volumeType,
+					})
+					if err != nil {
+						logging.Error("Failed to calculate costs for snapshot", err, map[string]interface{}{
+							"account_id":    t.accountID,
+							"region":        t.opts.Region,
+							"snapshot_id":   aws.StringValue(blockDevice.Ebs.SnapshotId),
+							"volume_type":   volumeType,
+							"duration_ms":   time.Since(costStart).Milliseconds(),
+						})
+					} else {
+						// Add costs to total
+						if totalCosts == nil {
+							totalCosts = costs
+						} else {
+							totalCosts.HourlyRate += costs.HourlyRate
+							totalCosts.MonthlyRate += costs.MonthlyRate
+							if costs.Lifetime != nil {
+								if totalCosts.Lifetime == nil {
+									totalCosts.Lifetime = costs.Lifetime
+								} else {
+									newLifetime := *totalCosts.Lifetime + *costs.Lifetime
+									totalCosts.Lifetime = &newLifetime
+								}
+							}
+						}
+					}
+				}
 
 				snapshotDetails = append(snapshotDetails, map[string]interface{}{
 					"snapshot_id":   aws.StringValue(blockDevice.Ebs.SnapshotId),
 					"device_name":   aws.StringValue(blockDevice.DeviceName),
 					"volume_size":   snapshotSize,
-					"volume_type":   aws.StringValue(blockDevice.Ebs.VolumeType),
+					"volume_type":   volumeType,
 					"creation_date": aws.TimeValue(snapshot.Snapshots[0].StartTime),
 				})
 			}
 		}
 	}
 
-	// Calculate costs using the cost estimator
-	costEstimator := awslib.DefaultCostEstimator
-	var costs *awslib.CostBreakdown
-	if costEstimator != nil {
-		costStart := time.Now()
-		hoursRunning := t.now.Sub(creationDate).Hours()
-
-		costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-			ResourceType:  "EBSSnapshots",
-			ResourceSize: totalSnapshotSize,
-			Region:       t.opts.Region,
-			CreationTime: creationDate,
+	if totalCosts != nil {
+		logging.Debug("Cost calculation completed", map[string]interface{}{
+			"resource_id": amiID,
+			"duration_ms": time.Since(costStart).Milliseconds(),
 		})
-		if err != nil {
-			logging.Error("Failed to calculate costs", err, map[string]interface{}{
-				"account_id":    t.accountID,
-				"region":        t.opts.Region,
-				"resource_name": amiName,
-				"resource_id":   amiID,
-				"duration_ms":   time.Since(costStart).Milliseconds(),
-			})
-		} else {
-			logging.Debug("Cost calculation completed", map[string]interface{}{
-				"resource_id": amiID,
-				"duration_ms": time.Since(costStart).Milliseconds(),
-			})
-
-			// Calculate lifetime cost
-			lifetime := costs.HourlyRate * hoursRunning
-			costs.Lifetime = &lifetime
-		}
 	}
 
 	// Convert AWS tags to map
@@ -222,7 +239,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		Reason:       reason,
 		Tags:         tags,
 		Details:      details,
-		Cost:         map[string]interface{}{"total": costs},
+		Cost:         map[string]interface{}{"total": totalCosts},
 	}, nil
 }
 
