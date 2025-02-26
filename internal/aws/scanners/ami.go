@@ -149,7 +149,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 						ResourceType:  "EBSSnapshots",
 						ResourceSize: snapshotSize,
 						Region:       t.opts.Region,
-						CreationTime: aws.TimeValue(snapshot.Snapshots[0].StartTime),
+						CreationTime: creationDate, // Use AMI creation date for all snapshots
 						VolumeType:   volumeType,
 					})
 					if err != nil {
@@ -167,14 +167,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 						} else {
 							totalCosts.HourlyRate += costs.HourlyRate
 							totalCosts.MonthlyRate += costs.MonthlyRate
-							if costs.Lifetime != nil {
-								if totalCosts.Lifetime == nil {
-									totalCosts.Lifetime = costs.Lifetime
-								} else {
-									newLifetime := *totalCosts.Lifetime + *costs.Lifetime
-									totalCosts.Lifetime = &newLifetime
-								}
-							}
+							totalCosts.YearlyRate += costs.YearlyRate
 						}
 					}
 				}
@@ -190,10 +183,18 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		}
 	}
 
+	// Calculate lifetime cost based on AMI age and total hourly rate
 	if totalCosts != nil {
+		hoursRunning := t.now.Sub(creationDate).Hours()
+		lifetime := totalCosts.HourlyRate * hoursRunning
+		totalCosts.Lifetime = &lifetime
+
 		logging.Debug("Cost calculation completed", map[string]interface{}{
 			"resource_id": amiID,
 			"duration_ms": time.Since(costStart).Milliseconds(),
+			"hours_running": hoursRunning,
+			"hourly_rate": totalCosts.HourlyRate,
+			"lifetime_cost": lifetime,
 		})
 	}
 
