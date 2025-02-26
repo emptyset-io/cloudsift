@@ -290,10 +290,10 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 	// Create rate limiter specific to this account/region with lower rate for IAM
 	rateLimiterKey := fmt.Sprintf("%s-%s-iam", accountID, opts.Region)
 	iamConfig := &config.RateLimitConfig{
-		RequestsPerSecond: 35.0,                   // IAM has lower rate limits
-		MaxRetries:        10,                     // Keep retrying on throttling
-		BaseDelay:         200 * time.Millisecond, // Start with higher base delay
-		MaxDelay:          120 * time.Second,      // Keep 2 minute max delay
+		RequestsPerSecond: 35.0,              // IAM has lower rate limits
+		MaxRetries:        10,                // Keep retrying on throttling
+		BaseDelay:         1 * time.Second,   // Start with higher base delay
+		MaxDelay:          120 * time.Second, // Keep 2 minute max delay
 	}
 	rateLimiter := awslib.GetGlobalRegistry().GetRateLimiter(rateLimiterKey, iamConfig)
 
