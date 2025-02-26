@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"strings"
 
+	initCmd "cloudsift/cmd/init"
 	"cloudsift/cmd/list"
 	"cloudsift/cmd/scan"
 	"cloudsift/cmd/version"
@@ -15,7 +16,20 @@ import (
 
 // Execute adds all child commands to the root command and sets flags appropriately
 func Execute() error {
-	var logLevel string
+	var (
+		logLevel   string
+		configFile string
+	)
+
+	// Initialize config
+	if err := config.InitConfig(); err != nil {
+		return err
+	}
+
+	// Create default config if it doesn't exist
+	if err := config.CreateDefaultConfig(); err != nil {
+		return err
+	}
 
 	rootCmd := &cobra.Command{
 		Use:   "cloudsift",
@@ -23,6 +37,11 @@ func Execute() error {
 		Long: `CloudSift is a command-line tool for managing and inspecting AWS resources.
 It provides a simple interface for common AWS tasks and operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Set config file if specified
+			if configFile != "" {
+				config.SetConfigFile(configFile)
+			}
+
 			// Configure logging based on flags
 			logFormat := logging.Text
 
@@ -60,6 +79,7 @@ It provides a simple interface for common AWS tasks and operations.`,
 	}
 
 	// Add global flags
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Path to config file")
 	rootCmd.PersistentFlags().StringVarP(&config.Config.Profile, "profile", "p", "default", "AWS profile to use (supports SSO profiles)")
 	rootCmd.PersistentFlags().StringVar(&config.Config.OrganizationRole, "organization-role", "", "Role name to assume for organization-wide operations")
 	rootCmd.PersistentFlags().StringVar(&config.Config.ScannerRole, "scanner-role", "", "Role name to assume for scanning operations")
@@ -69,8 +89,9 @@ It provides a simple interface for common AWS tasks and operations.`,
 		"Set logging level (DEBUG, INFO, WARN, ERROR)")
 
 	// Add commands
-	rootCmd.AddCommand(list.NewListCmd())
 	rootCmd.AddCommand(scan.NewScanCmd())
+	rootCmd.AddCommand(list.NewListCmd())
+	rootCmd.AddCommand(initCmd.NewInitCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	return rootCmd.Execute()

@@ -18,6 +18,39 @@ type GlobalConfig struct {
 
 	// LogFormat is the format for logging
 	LogFormat string
+
+	// LogLevel is the level for logging
+	LogLevel string
+
+	// ScanRegions is the list of regions to scan
+	ScanRegions string
+
+	// ScanScanners is the list of scanners to use
+	ScanScanners string
+
+	// ScanOutput is the output file for scan results
+	ScanOutput string
+
+	// ScanOutputFormat is the format for scan output
+	ScanOutputFormat string
+
+	// ScanBucket is the S3 bucket to scan
+	ScanBucket string
+
+	// ScanBucketRegion is the region of the S3 bucket to scan
+	ScanBucketRegion string
+
+	// ScanDaysUnused is the number of days since last usage to consider an object unused
+	ScanDaysUnused int
+
+	// ScanIgnoreResourceIDs is the list of resource IDs to ignore
+	ScanIgnoreResourceIDs []string
+
+	// ScanIgnoreResourceNames is the list of resource names to ignore
+	ScanIgnoreResourceNames []string
+
+	// ScanIgnoreTags is the map of tags to ignore
+	ScanIgnoreTags map[string]string
 }
 
 // Config is the global configuration instance
