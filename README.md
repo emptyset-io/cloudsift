@@ -386,10 +386,6 @@ scan:
       Environment: production   # Will match "ENVIRONMENT: PRODUCTION"
       KeepAlive: "true"        # Will match "keepalive: TRUE"
       Project: critical        # Will match "PROJECT: CRITICAL"
-    
-    regions:
-      - us-west-1             # Regions to ignore
-      - eu-west-1
 ```
 
 ## Documentation
