@@ -300,7 +300,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			for _, instance := range reservation.Instances {
 				// Create a copy of instance for the closure
 				instanceCopy := instance
-				
+
 				task := func(ctx context.Context) error {
 					totalInstances++
 
@@ -405,7 +405,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 						var costDetails map[string]interface{}
 						if costEstimator != nil {
 							costCalculations++
-							
+
 							// Calculate EBS volume costs first - these are always included
 							var totalCosts *awslib.CostBreakdown
 							if len(ebsDetails) > 0 {
@@ -547,11 +547,11 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	scanDuration := time.Since(startTime)
 	logging.Info("Completed EC2 instance scan", map[string]interface{}{
 		"account_id":        accountID,
-		"region":           opts.Region,
-		"total_instances":  totalInstances,
-		"unused_instances": len(results),
+		"region":            opts.Region,
+		"total_instances":   totalInstances,
+		"unused_instances":  len(results),
 		"cost_calculations": costCalculations,
-		"duration_ms":      scanDuration.Milliseconds(),
+		"duration_ms":       scanDuration.Milliseconds(),
 	})
 
 	return results, nil

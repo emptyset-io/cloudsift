@@ -93,13 +93,13 @@ func (p *Pool) GetMetrics() PoolMetrics {
 
 	// Create a new metrics struct without copying the mutex
 	return PoolMetrics{
-		TotalTasks: p.metrics.TotalTasks,
-		CompletedTasks: p.metrics.CompletedTasks,
-		FailedTasks: p.metrics.FailedTasks,
-		CurrentWorkers: atomic.LoadInt64(&p.activeWorkers),
-		PeakWorkers: p.metrics.PeakWorkers,
+		TotalTasks:         p.metrics.TotalTasks,
+		CompletedTasks:     p.metrics.CompletedTasks,
+		FailedTasks:        p.metrics.FailedTasks,
+		CurrentWorkers:     atomic.LoadInt64(&p.activeWorkers),
+		PeakWorkers:        p.metrics.PeakWorkers,
 		AverageExecutionMs: p.metrics.TotalExecutionMs / max(p.metrics.CompletedTasks, 1),
-		TotalExecutionMs: p.metrics.TotalExecutionMs,
+		TotalExecutionMs:   p.metrics.TotalExecutionMs,
 	}
 }
 

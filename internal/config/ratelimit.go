@@ -17,9 +17,9 @@ type RateLimitConfig struct {
 var (
 	// DefaultRateLimitConfig provides default values for rate limiting
 	DefaultRateLimitConfig = RateLimitConfig{
-		RequestsPerSecond: 20.0,    // AWS APIs generally allow 20+ TPS for most operations
-		MaxRetries:       10,       // Keep 10 retries as it's reasonable
-		BaseDelay:        100 * time.Millisecond, // Start with 100ms delay
-		MaxDelay:         120 * time.Second,      // Keep 2 minute max delay
+		RequestsPerSecond: 20.0,                   // AWS APIs generally allow 20+ TPS for most operations
+		MaxRetries:        10,                     // Keep 10 retries as it's reasonable
+		BaseDelay:         100 * time.Millisecond, // Start with 100ms delay
+		MaxDelay:          120 * time.Second,      // Keep 2 minute max delay
 	}
 )

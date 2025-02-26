@@ -127,7 +127,7 @@ func ListCurrentAccount(sess *session.Session) ([]Account, error) {
 	if err != nil {
 		logging.Warn("Could not get account name from Organizations API, using account ID as name", map[string]interface{}{
 			"account_id": accountID,
-			"error":     err,
+			"error":      err,
 		})
 		accountName = accountID
 	}

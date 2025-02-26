@@ -200,9 +200,9 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 
 		if len(reasons) > 0 {
 			details := map[string]interface{}{
-				"ItemCount":      aws.Int64Value(tableDesc.Table.ItemCount),
-				"TableSizeBytes": aws.Int64Value(tableDesc.Table.TableSizeBytes),
-				"ReadThroughput": metrics["read_throughput"],
+				"ItemCount":       aws.Int64Value(tableDesc.Table.ItemCount),
+				"TableSizeBytes":  aws.Int64Value(tableDesc.Table.TableSizeBytes),
+				"ReadThroughput":  metrics["read_throughput"],
 				"WriteThroughput": metrics["write_throughput"],
 				"ThrottledEvents": metrics["throttled_events"],
 				"account_id":      accountID,

@@ -239,7 +239,7 @@ func (ce *CostEstimator) loadCache() error {
 	ce.cacheLock.Lock()
 	ce.priceCache = cache
 	ce.cacheLock.Unlock()
-	
+
 	return nil
 }
 

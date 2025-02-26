@@ -118,9 +118,9 @@ func (rl *RateLimiter) OnSuccess() {
 		prevCount := rl.failureCount
 		rl.failureCount = 0
 		rl.backoffResetAt = time.Now()
-		
+
 		logging.Debug("Rate limiter backoff reset", map[string]interface{}{
-			"previous_failures": prevCount,
+			"previous_failures":     prevCount,
 			"time_since_failure_ms": time.Since(rl.lastFailure).Milliseconds(),
 		})
 	}
