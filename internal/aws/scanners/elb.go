@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	daysThreshold = 30 // Days to look back for metrics
+	MetricDatapointThreshold  = 10
+	RequestDeviationThreshold = 0.1
 )
 
 // ELBScanner scans for unused Elastic Load Balancers
@@ -61,6 +62,15 @@ func (s *ELBScanner) getLoadBalancerName(elbClient *elbv2.ELBV2, lb *elbv2.LoadB
 
 	// Fall back to LoadBalancer name from ARN
 	return aws.StringValue(lb.LoadBalancerName)
+}
+
+func getLoadBalancerShortName(arn string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 6 {
+		return parts[5] // This gets the "app/my-alb/1234567890" part
+	} else {
+		return arn
+	}
 }
 
 // hasAttachedResources checks if the load balancer has any attached resources
@@ -114,53 +124,26 @@ func (s *ELBScanner) hasAttachedResources(elbClient *elbv2.ELBV2, classicClient 
 }
 
 // getLoadBalancerMetrics gets CloudWatch metrics for the load balancer
-func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb interface{}) (map[string]interface{}, error) {
+func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb interface{}, opts awslib.ScanOptions) (map[string]interface{}, error) {
 	endTime := time.Now()
-	startTime := endTime.Add(-time.Duration(daysThreshold) * 24 * time.Hour)
+	startTime := endTime.Add(-time.Duration(opts.DaysUnused) * 24 * time.Hour)
 
 	// Determine metrics based on LB type
 	var namespace, requestMetric, bytesMetric, dimensionName, dimensionValue string
+	var period int64 = 86400 // 1 day
 
 	switch v := lb.(type) {
 	case *elbv2.LoadBalancer:
-		lbARN := aws.StringValue(v.LoadBalancerArn)
+		namespace = "AWS/ApplicationELB"
+		requestMetric = "RequestCount"
+		bytesMetric = "ProcessedBytes"
 		dimensionName = "LoadBalancer"
+		dimensionValue = getLoadBalancerShortName(aws.StringValue(v.LoadBalancerArn))
 
-		if strings.Contains(lbARN, "app/") {
-			namespace = "AWS/ApplicationELB"
-			requestMetric = "RequestCount"
-			bytesMetric = "ProcessedBytes"
-			// For ALB, we need to extract the resource portion of the ARN (e.g., app/my-alb/1234567890)
-			parts := strings.Split(lbARN, ":")
-			if len(parts) >= 6 {
-				dimensionValue = parts[5] // This gets the "app/my-alb/1234567890" part
-			} else {
-				return nil, fmt.Errorf("invalid ALB ARN format: %s", lbARN)
-			}
-		} else if strings.Contains(lbARN, "net/") {
-			namespace = "AWS/NetworkELB"
-			requestMetric = "ActiveFlowCount"
-			bytesMetric = "ProcessedBytes"
-			// For NLB, we need to extract the resource portion of the ARN
-			parts := strings.Split(lbARN, ":")
-			if len(parts) >= 6 {
-				dimensionValue = parts[5] // This gets the "net/my-nlb/1234567890" part
-			} else {
-				return nil, fmt.Errorf("invalid NLB ARN format: %s", lbARN)
-			}
-		} else if strings.Contains(lbARN, "gateway/") {
+		// For Gateway LB, use different namespace and 1 day period
+		if aws.StringValue(v.Type) == "gateway" {
 			namespace = "AWS/GatewayELB"
-			requestMetric = "ActiveFlowCount"
-			bytesMetric = "ProcessedBytes"
-			// For GWLB, we need to extract the resource portion of the ARN
-			parts := strings.Split(lbARN, ":")
-			if len(parts) >= 6 {
-				dimensionValue = parts[5] // This gets the "gateway/my-gwlb/1234567890" part
-			} else {
-				return nil, fmt.Errorf("invalid GWLB ARN format: %s", lbARN)
-			}
-		} else {
-			return nil, fmt.Errorf("unknown load balancer type for ARN: %s", lbARN)
+			period = 86400 // 1 day
 		}
 	case *elb.LoadBalancerDescription:
 		namespace = "AWS/ELB"
@@ -169,64 +152,58 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 		dimensionName = "LoadBalancerName"
 		dimensionValue = aws.StringValue(v.LoadBalancerName)
 	default:
-		return nil, fmt.Errorf("unknown load balancer type")
+		return nil, fmt.Errorf("unknown load balancer type: %T", lb)
 	}
 
-	// Validate all required fields are set
-	if namespace == "" || requestMetric == "" || dimensionName == "" || dimensionValue == "" {
-		return nil, fmt.Errorf("missing required metric parameters: namespace=%s, metric=%s, dimension=%s:%s",
-			namespace, requestMetric, dimensionName, dimensionValue)
-	}
-
-	// Get request metrics
-	requestInput := &cloudwatch.GetMetricStatisticsInput{
+	// Get request count metrics
+	requestData, err := cwClient.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
 		Namespace:  aws.String(namespace),
 		MetricName: aws.String(requestMetric),
-		StartTime:  aws.Time(startTime),
-		EndTime:    aws.Time(endTime),
-		Period:     aws.Int64(3600), // 1 hour
-		Statistics: []*string{aws.String("Sum")},
 		Dimensions: []*cloudwatch.Dimension{
 			{
 				Name:  aws.String(dimensionName),
 				Value: aws.String(dimensionValue),
 			},
 		},
-	}
-
-	requestData, err := cwClient.GetMetricStatistics(requestInput)
+		StartTime: aws.Time(startTime),
+		EndTime:   aws.Time(endTime),
+		Period:    aws.Int64(period),
+		Statistics: []*string{
+			aws.String("Sum"),
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get request metrics: %w", err)
 	}
 
 	// Get bytes processed metrics
-	bytesInput := &cloudwatch.GetMetricStatisticsInput{
+	bytesData, err := cwClient.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
 		Namespace:  aws.String(namespace),
 		MetricName: aws.String(bytesMetric),
-		StartTime:  aws.Time(startTime),
-		EndTime:    aws.Time(endTime),
-		Period:     aws.Int64(3600), // 1 hour
-		Statistics: []*string{aws.String("Sum")},
 		Dimensions: []*cloudwatch.Dimension{
 			{
 				Name:  aws.String(dimensionName),
 				Value: aws.String(dimensionValue),
 			},
 		},
-	}
-
-	bytesData, err := cwClient.GetMetricStatistics(bytesInput)
+		StartTime: aws.Time(startTime),
+		EndTime:   aws.Time(endTime),
+		Period:    aws.Int64(period),
+		Statistics: []*string{
+			aws.String("Sum"),
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bytes metrics: %w", err)
 	}
 
 	// Calculate total requests and bytes
 	var totalRequests, totalBytes float64
-	var requestPoints []float64
+	var requestCounts []float64
 
 	for _, point := range requestData.Datapoints {
 		totalRequests += aws.Float64Value(point.Sum)
-		requestPoints = append(requestPoints, aws.Float64Value(point.Sum))
+		requestCounts = append(requestCounts, aws.Float64Value(point.Sum))
 	}
 
 	for _, point := range bytesData.Datapoints {
@@ -235,14 +212,14 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 
 	// Calculate request deviation
 	var requestDeviation float64
-	if len(requestPoints) >= 2 {
-		mean := totalRequests / float64(len(requestPoints))
+	if len(requestCounts) >= 2 {
+		mean := totalRequests / float64(len(requestCounts))
 		var sumSquares float64
-		for _, point := range requestPoints {
+		for _, point := range requestCounts {
 			diff := point - mean
 			sumSquares += diff * diff
 		}
-		variance := sumSquares / float64(len(requestPoints))
+		variance := sumSquares / float64(len(requestCounts))
 		requestDeviation = math.Sqrt(variance)
 	}
 
@@ -251,11 +228,12 @@ func (s *ELBScanner) getLoadBalancerMetrics(cwClient *cloudwatch.CloudWatch, lb 
 		"TotalBytesSent":   totalBytes,
 		"RequestDeviation": requestDeviation,
 		"ProcessedGB":      totalBytes / 1024 / 1024 / 1024, // Convert bytes to GB
+		"DatapointCount":   float64(len(requestCounts)),
 	}, nil
 }
 
-// isUnusedLoadBalancer determines if a load balancer is unused
-func (s *ELBScanner) isUnusedLoadBalancer(elbClient *elbv2.ELBV2, classicClient *elb.ELB, lb interface{}, metrics map[string]interface{}) (bool, string) {
+// isUnusedLoadBalancer determines if a load balancer is unused based on metrics and attached resources
+func (s *ELBScanner) isUnusedLoadBalancer(elbClient *elbv2.ELBV2, classicClient *elb.ELB, lb interface{}, metrics map[string]interface{}, opts awslib.ScanOptions) (bool, string) {
 	// First check if there are any attached resources
 	hasResources, err := s.hasAttachedResources(elbClient, classicClient, lb)
 	if err != nil {
@@ -266,16 +244,21 @@ func (s *ELBScanner) isUnusedLoadBalancer(elbClient *elbv2.ELBV2, classicClient 
 		return true, "No resources attached"
 	}
 
+	// Check if we have enough datapoints
+	if metrics["DatapointCount"].(float64) < MetricDatapointThreshold {
+		return false, ""
+	}
+
 	totalRequests := metrics["TotalRequests"].(float64)
 	totalBytes := metrics["TotalBytesSent"].(float64)
 	requestDeviation := metrics["RequestDeviation"].(float64)
 
 	if totalRequests == 0 && totalBytes == 0 {
-		return true, fmt.Sprintf("No traffic recorded during the threshold period of %d days", daysThreshold)
+		return true, fmt.Sprintf("No traffic recorded during the threshold period of %d days", opts.DaysUnused)
 	}
 
-	if requestDeviation < 0.1 {
-		return true, "Low traffic variation (low deviation)"
+	if requestDeviation < RequestDeviationThreshold {
+		return true, fmt.Sprintf("Very low traffic variation (%.2f) over %d days", requestDeviation, opts.DaysUnused)
 	}
 
 	return false, ""
@@ -355,7 +338,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		})
 
 		// Get metrics
-		metrics, err := s.getLoadBalancerMetrics(cwClient, lb)
+		metrics, err := s.getLoadBalancerMetrics(cwClient, lb, opts)
 		if err != nil {
 			logging.Error("Failed to get load balancer metrics", err, map[string]interface{}{
 				"name": lbName,
@@ -364,18 +347,51 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			continue
 		}
 
-		// Check if unused
-		unused, reason := s.isUnusedLoadBalancer(elbv2Client, elbClassicClient, lb, metrics)
-		if !unused {
+		// Check if unused based on metrics and resources
+		isUnused, reason := s.isUnusedLoadBalancer(elbv2Client, elbClassicClient, lb, metrics, opts)
+		if !isUnused {
 			continue
 		}
 
-		// Get all tags
+		// Build result details
+		details := map[string]interface{}{
+			// Common fields
+			"type":            aws.StringValue(lb.Type),
+			"arn":             aws.StringValue(lb.LoadBalancerArn),
+			"name":            aws.StringValue(lb.LoadBalancerName),
+			"scheme":          aws.StringValue(lb.Scheme),
+			"vpc_id":          aws.StringValue(lb.VpcId),
+			"state":           aws.StringValue(lb.State.Code),
+			"state_reason":    aws.StringValue(lb.State.Reason),
+			"created_time":    lb.CreatedTime.Format(time.RFC3339),
+			"ip_address_type": aws.StringValue(lb.IpAddressType),
+			"security_groups": aws.StringValueSlice(lb.SecurityGroups),
+
+			// Availability zones as simple maps
+			"availability_zones": func() []map[string]string {
+				zones := make([]map[string]string, len(lb.AvailabilityZones))
+				for i, az := range lb.AvailabilityZones {
+					zones[i] = map[string]string{
+						"zone_name": aws.StringValue(az.ZoneName),
+						"subnet_id": aws.StringValue(az.SubnetId),
+					}
+				}
+				return zones
+			}(),
+
+			// Metric data
+			"total_requests":    metrics["TotalRequests"].(float64),
+			"total_bytes":       metrics["TotalBytesSent"].(float64),
+			"request_deviation": metrics["RequestDeviation"].(float64),
+			"processed_gb":      metrics["ProcessedGB"].(float64),
+			"datapoint_count":   metrics["DatapointCount"].(float64),
+		}
+
+		// Add tags
+		tags := make(map[string]string)
 		tagsInput := &elbv2.DescribeTagsInput{
 			ResourceArns: []*string{lb.LoadBalancerArn},
 		}
-		tags := make(map[string]string)
-
 		if tagDesc, err := elbv2Client.DescribeTags(tagsInput); err == nil {
 			for _, tagSet := range tagDesc.TagDescriptions {
 				for _, tag := range tagSet.Tags {
@@ -384,50 +400,17 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			}
 		}
 
-		// Determine LB type for cost calculation
-		var lbType string
-		if strings.Contains(lbARN, "app/") {
-			lbType = "application"
-		} else if strings.Contains(lbARN, "net/") {
-			lbType = "network"
-		} else if strings.Contains(lbARN, "gateway/") {
-			lbType = "gateway"
-		}
-
-		// Calculate costs using fixed rates instead of pricing API
-		costs := s.calculateELBCosts(lbType)
-
-		// Set lifetime cost to N/A since we can't determine creation time
-		var lifetime float64 = 0
-		costs.Lifetime = &lifetime
-		var hours float64 = 0
-		costs.HoursRunning = &hours
-
-		// Create result
-		result := awslib.ScanResult{
+		results = append(results, awslib.ScanResult{
 			ResourceType: s.Label(),
 			ResourceName: lbName,
-			ResourceID:   lbARN,
+			ResourceID:   aws.StringValue(lb.LoadBalancerArn),
 			Reason:       reason,
-			Details: map[string]interface{}{
-				"account_id":        opts.AccountID,
-				"region":            opts.Region,
-				"type":              lbType,
-				"scheme":            aws.StringValue(lb.Scheme),
-				"vpc_id":            aws.StringValue(lb.VpcId),
-				"state":             aws.StringValue(lb.State.Code),
-				"total_requests":    metrics["TotalRequests"],
-				"total_bytes":       metrics["TotalBytesSent"],
-				"processed_gb":      metrics["ProcessedGB"],
-				"request_deviation": metrics["RequestDeviation"],
-			},
-			Tags: tags,
+			Tags:         tags,
+			Details:      details,
 			Cost: map[string]interface{}{
-				"total": costs,
+				"total": s.calculateELBCosts(aws.StringValue(lb.Type)),
 			},
-		}
-
-		results = append(results, result)
+		})
 	}
 
 	// Scan Classic Load Balancers
@@ -454,7 +437,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		})
 
 		// Get metrics
-		metrics, err := s.getLoadBalancerMetrics(cwClient, lb)
+		metrics, err := s.getLoadBalancerMetrics(cwClient, lb, opts)
 		if err != nil {
 			logging.Error("Failed to get load balancer metrics", err, map[string]interface{}{
 				"name": lbName,
@@ -462,18 +445,86 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			continue
 		}
 
-		// Check if unused
-		unused, reason := s.isUnusedLoadBalancer(elbv2Client, elbClassicClient, lb, metrics)
-		if !unused {
+		// Check if unused based on metrics and resources
+		isUnused, reason := s.isUnusedLoadBalancer(elbv2Client, elbClassicClient, lb, metrics, opts)
+		if !isUnused {
 			continue
 		}
 
-		// Get all tags
+		// Build result details for classic ELB
+		details := map[string]interface{}{
+			// Common fields
+			"type":            "classic",
+			"name":            aws.StringValue(lb.LoadBalancerName),
+			"dns_name":        aws.StringValue(lb.DNSName),
+			"scheme":          aws.StringValue(lb.Scheme),
+			"vpc_id":          aws.StringValue(lb.VPCId),
+			"created_time":    lb.CreatedTime.Format(time.RFC3339),
+			"security_groups": aws.StringValueSlice(lb.SecurityGroups),
+
+			// Source security group as flat fields
+			"source_security_group_name":  aws.StringValue(lb.SourceSecurityGroup.GroupName),
+			"source_security_group_owner": aws.StringValue(lb.SourceSecurityGroup.OwnerAlias),
+
+			// Simple string arrays
+			"availability_zones": aws.StringValueSlice(lb.AvailabilityZones),
+			"subnets":            aws.StringValueSlice(lb.Subnets),
+			"instance_ids": func() []string {
+				ids := make([]string, len(lb.Instances))
+				for i, inst := range lb.Instances {
+					ids[i] = aws.StringValue(inst.InstanceId)
+				}
+				return ids
+			}(),
+
+			// Health check as flat fields
+			"health_check_target":              aws.StringValue(lb.HealthCheck.Target),
+			"health_check_interval":            aws.Int64Value(lb.HealthCheck.Interval),
+			"health_check_timeout":             aws.Int64Value(lb.HealthCheck.Timeout),
+			"health_check_unhealthy_threshold": aws.Int64Value(lb.HealthCheck.UnhealthyThreshold),
+			"health_check_healthy_threshold":   aws.Int64Value(lb.HealthCheck.HealthyThreshold),
+
+			// Backend servers as simple maps
+			"backend_servers": func() []map[string]interface{} {
+				backends := make([]map[string]interface{}, len(lb.BackendServerDescriptions))
+				for i, backend := range lb.BackendServerDescriptions {
+					backends[i] = map[string]interface{}{
+						"instance_port": aws.Int64Value(backend.InstancePort),
+						"policy_names":  aws.StringValueSlice(backend.PolicyNames),
+					}
+				}
+				return backends
+			}(),
+
+			// Listeners as simple maps
+			"listeners": func() []map[string]interface{} {
+				listeners := make([]map[string]interface{}, len(lb.ListenerDescriptions))
+				for i, listener := range lb.ListenerDescriptions {
+					listeners[i] = map[string]interface{}{
+						"protocol":           aws.StringValue(listener.Listener.Protocol),
+						"load_balancer_port": aws.Int64Value(listener.Listener.LoadBalancerPort),
+						"instance_protocol":  aws.StringValue(listener.Listener.InstanceProtocol),
+						"instance_port":      aws.Int64Value(listener.Listener.InstancePort),
+						"ssl_certificate_id": aws.StringValue(listener.Listener.SSLCertificateId),
+						"policy_names":       aws.StringValueSlice(listener.PolicyNames),
+					}
+				}
+				return listeners
+			}(),
+
+			// Metric data
+			"total_requests":    metrics["TotalRequests"].(float64),
+			"total_bytes":       metrics["TotalBytesSent"].(float64),
+			"request_deviation": metrics["RequestDeviation"].(float64),
+			"processed_gb":      metrics["ProcessedGB"].(float64),
+			"datapoint_count":   metrics["DatapointCount"].(float64),
+		}
+
+		// Add tags
+		tags := make(map[string]string)
 		tagsInput := &elb.DescribeTagsInput{
 			LoadBalancerNames: []*string{lb.LoadBalancerName},
 		}
-		tags := make(map[string]string)
-
 		if tagDesc, err := elbClassicClient.DescribeTags(tagsInput); err == nil {
 			for _, tagSet := range tagDesc.TagDescriptions {
 				for _, tag := range tagSet.Tags {
@@ -482,39 +533,17 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			}
 		}
 
-		// Calculate costs using fixed rates instead of pricing API
-		costs := s.calculateELBCosts("classic")
-
-		// Set lifetime cost to N/A since we can't determine creation time
-		var lifetime float64 = 0
-		costs.Lifetime = &lifetime
-		var hours float64 = 0
-		costs.HoursRunning = &hours
-
-		// Create result
-		result := awslib.ScanResult{
+		results = append(results, awslib.ScanResult{
 			ResourceType: s.Label(),
 			ResourceName: lbName,
-			ResourceID:   lbName,
+			ResourceID:   aws.StringValue(lb.LoadBalancerName),
 			Reason:       reason,
-			Details: map[string]interface{}{
-				"account_id":        opts.AccountID,
-				"region":            opts.Region,
-				"type":              "classic",
-				"scheme":            aws.StringValue(lb.Scheme),
-				"vpc_id":            aws.StringValue(lb.VPCId),
-				"total_requests":    metrics["TotalRequests"],
-				"total_bytes":       metrics["TotalBytesSent"],
-				"processed_gb":      metrics["ProcessedGB"],
-				"request_deviation": metrics["RequestDeviation"],
-			},
-			Tags: tags,
+			Tags:         tags,
+			Details:      details,
 			Cost: map[string]interface{}{
-				"total": costs,
+				"total": s.calculateELBCosts("classic"),
 			},
-		}
-
-		results = append(results, result)
+		})
 	}
 
 	return results, nil

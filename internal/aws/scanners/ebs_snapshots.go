@@ -33,6 +33,35 @@ func (s *EBSSnapshotScanner) Label() string {
 	return "EBS Snapshots"
 }
 
+// calculateSnapshotCosts calculates the cost of storing an EBS snapshot
+func (s *EBSSnapshotScanner) calculateSnapshotCosts(sizeGiB int64, hoursRunning float64) *awslib.CostBreakdown {
+	// EBS snapshot pricing is typically around $0.05 per GB-month
+	// This is an approximation as prices vary by region
+	const gbMonthRate = 0.05
+
+	// Calculate GB-month cost
+	gbMonth := float64(sizeGiB) * gbMonthRate
+
+	// Convert to daily/hourly rates
+	hourlyRate := gbMonth / (30 * 24) // Approximate month to 30 days
+	dailyRate := gbMonth / 30
+	monthlyRate := gbMonth
+	yearlyRate := gbMonth * 12
+
+	// Calculate lifetime cost
+	lifetime := float64(int(hourlyRate*hoursRunning*100+0.5)) / 100
+	hours := float64(int(hoursRunning*100+0.5)) / 100
+
+	return &awslib.CostBreakdown{
+		HourlyRate:   hourlyRate,
+		DailyRate:    dailyRate,
+		MonthlyRate:  monthlyRate,
+		YearlyRate:   yearlyRate,
+		Lifetime:     &lifetime,
+		HoursRunning: &hours,
+	}
+}
+
 // Scan implements Scanner interface
 func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 	// Get regional session
@@ -208,6 +237,13 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			}
 
 			if len(reasons) > 0 {
+				// Calculate costs based on snapshot size and age
+				costCalculations++
+				hoursRunning := time.Since(*snapshot.StartTime).Hours()
+				cost := map[string]interface{}{
+					"total": s.calculateSnapshotCosts(aws.Int64Value(snapshot.VolumeSize), hoursRunning),
+				}
+
 				results = append(results, awslib.ScanResult{
 					ResourceType: s.Label(),
 					ResourceName: resourceName,
@@ -215,6 +251,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					Reason:       reasons[0],
 					Tags:         tags,
 					Details:      details,
+					Cost:         cost,
 				})
 			}
 		}
