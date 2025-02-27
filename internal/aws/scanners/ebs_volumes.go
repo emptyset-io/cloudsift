@@ -166,6 +166,89 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				continue
 			}
 
+			// Convert AWS tags to map
+			tags := make(map[string]string)
+			for _, tag := range volume.Tags {
+				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
+			}
+
+			details := map[string]interface{}{
+				// Resource identifiers
+				"account_id":    accountID,
+				"region":        opts.Region,
+				"volume_id":     aws.StringValue(volume.VolumeId),
+				"snapshot_id":   aws.StringValue(volume.SnapshotId),
+				"tags":         tags,
+				"reason":       fmt.Sprintf("Volume is unattached and %d days old.", unusedDays),
+				// Volume configuration
+				"volume_type":          aws.StringValue(volume.VolumeType),
+				"size_gb":             aws.Int64Value(volume.Size),
+				"iops":                aws.Int64Value(volume.Iops),
+				"throughput":          aws.Int64Value(volume.Throughput),
+				"encrypted":           aws.BoolValue(volume.Encrypted),
+				"kms_key_id":          aws.StringValue(volume.KmsKeyId),
+				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
+
+				// Location info
+				"availability_zone": aws.StringValue(volume.AvailabilityZone),
+				"outpost_arn":      aws.StringValue(volume.OutpostArn),
+
+				// Status and timing
+				"state":              aws.StringValue(volume.State),
+				"created":            volume.CreateTime.Format(time.RFC3339),
+				"age_days":           unusedDays,
+				"attachment_history": map[string]interface{}{
+					"currently_attached": isCurrentlyAttached,
+					"has_history":       hasAttachmentHistory,
+				},
+				"fast_restored": aws.BoolValue(volume.FastRestored),
+			}
+
+			// Add status details if available
+			if len(statusResp.VolumeStatuses) > 0 {
+				status := statusResp.VolumeStatuses[0]
+				volumeStatus := map[string]interface{}{
+					"status":                aws.StringValue(status.VolumeStatus.Status),
+					"details":               status.VolumeStatus.Details,
+					"availability_zone":     aws.StringValue(status.AvailabilityZone),
+				}
+
+				if status.Events != nil {
+					var events []map[string]interface{}
+					for _, event := range status.Events {
+						eventMap := map[string]interface{}{
+							"event_type":    aws.StringValue(event.EventType),
+							"description":   aws.StringValue(event.Description),
+							"event_id":      aws.StringValue(event.EventId),
+						}
+						if event.NotBefore != nil {
+							eventMap["not_before"] = event.NotBefore.Format(time.RFC3339)
+						}
+						if event.NotAfter != nil {
+							eventMap["not_after"] = event.NotAfter.Format(time.RFC3339)
+						}
+						events = append(events, eventMap)
+					}
+					volumeStatus["events"] = events
+				}
+
+				if status.Actions != nil {
+					var actions []map[string]interface{}
+					for _, action := range status.Actions {
+						actionMap := map[string]interface{}{
+							"code":        aws.StringValue(action.Code),
+							"description": aws.StringValue(action.Description),
+							"event_type":  aws.StringValue(action.EventType),
+							"event_id":    aws.StringValue(action.EventId),
+						}
+						actions = append(actions, actionMap)
+					}
+					volumeStatus["actions"] = actions
+				}
+
+				details["volume_status"] = volumeStatus
+			}
+
 			// Get volume metrics with error handling
 			volumeID := aws.StringValue(volume.VolumeId)
 			endTime := time.Now().UTC().Truncate(time.Minute)
@@ -186,7 +269,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			var unusedReasons []string
 
 			// Add attachment status to reasons
-			unusedReasons = append(unusedReasons, fmt.Sprintf("Volume is unattached and %d days old.", ageInDays))
+			unusedReasons = append(unusedReasons, fmt.Sprintf("Volume is unattached and %d days old.", unusedDays))
 
 			// Check metrics for activity with thresholds
 			const minActivityThreshold = 1.0 // Minimum ops/day to consider active
@@ -222,12 +305,6 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			// Skip if volume is not unused
 			if !isUnused {
 				continue
-			}
-
-			// Convert AWS tags to map
-			tags := make(map[string]string)
-			for _, tag := range volume.Tags {
-				tags[aws.StringValue(tag.Key)] = aws.StringValue(tag.Value)
 			}
 
 			// Get resource name from tags or use volume ID
@@ -304,83 +381,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				attachmentHistory["current_attachments"] = attachments
 			}
 
-			details := map[string]interface{}{
-				// Resource identifiers
-				"account_id":    accountID,
-				"region":        opts.Region,
-				"volume_id":     aws.StringValue(volume.VolumeId),
-				"snapshot_id":   aws.StringValue(volume.SnapshotId),
-				"tags":         tags,
-
-				// Volume configuration
-				"volume_type":          aws.StringValue(volume.VolumeType),
-				"size_gb":             aws.Int64Value(volume.Size),
-				"iops":                aws.Int64Value(volume.Iops),
-				"throughput":          aws.Int64Value(volume.Throughput),
-				"encrypted":           aws.BoolValue(volume.Encrypted),
-				"kms_key_id":          aws.StringValue(volume.KmsKeyId),
-				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
-
-				// Location info
-				"availability_zone": aws.StringValue(volume.AvailabilityZone),
-				"outpost_arn":      aws.StringValue(volume.OutpostArn),
-
-				// Status and timing
-				"state":              aws.StringValue(volume.State),
-				"created":            volume.CreateTime.Format(time.RFC3339),
-				"age_days":           ageInDays,
-				"attachment_history": attachmentHistory,
-				"fast_restored":     aws.BoolValue(volume.FastRestored),
-			}
-
-			// Add status details if available
-			if len(statusResp.VolumeStatuses) > 0 {
-				status := statusResp.VolumeStatuses[0]
-				volumeStatus := map[string]interface{}{
-					"status":                aws.StringValue(status.VolumeStatus.Status),
-					"details":               status.VolumeStatus.Details,
-					"availability_zone":     aws.StringValue(status.AvailabilityZone),
-				}
-
-				if status.Events != nil {
-					var events []map[string]interface{}
-					for _, event := range status.Events {
-						eventMap := map[string]interface{}{
-							"event_type":    aws.StringValue(event.EventType),
-							"description":   aws.StringValue(event.Description),
-							"event_id":      aws.StringValue(event.EventId),
-						}
-						if event.NotBefore != nil {
-							eventMap["not_before"] = event.NotBefore.Format(time.RFC3339)
-						}
-						if event.NotAfter != nil {
-							eventMap["not_after"] = event.NotAfter.Format(time.RFC3339)
-						}
-						events = append(events, eventMap)
-					}
-					volumeStatus["events"] = events
-				}
-
-				if status.Actions != nil {
-					var actions []map[string]interface{}
-					for _, action := range status.Actions {
-						actionMap := map[string]interface{}{
-							"code":        aws.StringValue(action.Code),
-							"description": aws.StringValue(action.Description),
-							"event_type":  aws.StringValue(action.EventType),
-							"event_id":    aws.StringValue(action.EventId),
-						}
-						actions = append(actions, actionMap)
-					}
-					volumeStatus["actions"] = actions
-				}
-
-				details["volume_status"] = volumeStatus
-			}
-
-			if metrics != nil {
-				details["metrics"] = metrics
-			}
+			details["attachment_history"] = attachmentHistory
 
 			// Build reasons
 			result := awslib.ScanResult{
@@ -400,7 +401,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				"region":        opts.Region,
 				"resource_name": resourceName,
 				"resource_id":   aws.StringValue(volume.VolumeId),
-				"age_days":      ageInDays,
+				"age_days":      unusedDays,
 			})
 		}
 		return true // Continue pagination

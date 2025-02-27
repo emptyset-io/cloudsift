@@ -93,27 +93,22 @@ func (s *IAMUserScanner) getLastKeyUsage(iamClient *iam.IAM, userName string) (*
 // determineUnusedReasons determines why a user is considered unused
 func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *time.Time, opts awslib.ScanOptions) []string {
 	var reasons []string
+	now := time.Now()
 
-	// Check for users who have never logged in
+	// Check if user has ever logged in
 	if lastLoginTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has never logged in to the console in the last %d days.", opts.DaysUnused))
+		reasons = append(reasons, fmt.Sprintf("User has never logged in"))
 	} else {
-		age := time.Since(*lastLoginTime)
-		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("User has not logged in for %d days (last login: %s).",
-				opts.DaysUnused, lastLoginTime.Format("2006-01-02")))
-		}
+		loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
+		reasons = append(reasons, fmt.Sprintf("User %s", loginAge))
 	}
 
-	// Check for access keys
+	// Check access key usage
 	if keyLastUsedTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has no access keys for %d days.", opts.DaysUnused))
+		reasons = append(reasons, fmt.Sprintf("User has no access keys"))
 	} else {
-		age := time.Since(*keyLastUsedTime)
-		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Access key has not been used in %d days (last used: %s).",
-				opts.DaysUnused, keyLastUsedTime.Format("2006-01-02")))
-		}
+		keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
+		reasons = append(reasons, fmt.Sprintf("Access keys %s", keyAge))
 	}
 
 	return reasons
