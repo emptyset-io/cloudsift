@@ -265,7 +265,7 @@ func (s *ELBScanner) isUnusedLoadBalancer(elbClient *elbv2.ELBV2, classicClient 
 }
 
 // calculateELBCosts calculates costs for a load balancer using fixed hourly rates
-func (s *ELBScanner) calculateELBCosts(lbType string) *awslib.CostBreakdown {
+func (s *ELBScanner) calculateELBCosts(lbType string, creationTime time.Time) *awslib.CostBreakdown {
 	var hourlyRate float64
 
 	switch lbType {
@@ -286,11 +286,18 @@ func (s *ELBScanner) calculateELBCosts(lbType string) *awslib.CostBreakdown {
 	monthlyRate := dailyRate * 30 // Approximate month
 	yearlyRate := monthlyRate * 12
 
+	// Calculate lifetime cost
+	hoursRunning := time.Since(creationTime).Hours()
+	lifetime := float64(int(hourlyRate*hoursRunning*100+0.5)) / 100
+	hours := float64(int(hoursRunning*100+0.5)) / 100
+
 	return &awslib.CostBreakdown{
-		HourlyRate:  hourlyRate,
-		DailyRate:   dailyRate,
-		MonthlyRate: monthlyRate,
-		YearlyRate:  yearlyRate,
+		HourlyRate:   hourlyRate,
+		DailyRate:    dailyRate,
+		MonthlyRate:  monthlyRate,
+		YearlyRate:   yearlyRate,
+		Lifetime:     &lifetime,
+		HoursRunning: &hours,
 	}
 }
 
@@ -408,7 +415,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			Tags:         tags,
 			Details:      details,
 			Cost: map[string]interface{}{
-				"total": s.calculateELBCosts(aws.StringValue(lb.Type)),
+				"total": s.calculateELBCosts(aws.StringValue(lb.Type), *lb.CreatedTime),
 			},
 		})
 	}
@@ -541,7 +548,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			Tags:         tags,
 			Details:      details,
 			Cost: map[string]interface{}{
-				"total": s.calculateELBCosts("classic"),
+				"total": s.calculateELBCosts("classic", *lb.CreatedTime),
 			},
 		})
 	}

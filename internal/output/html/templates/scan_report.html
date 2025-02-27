@@ -227,7 +227,7 @@
                             <td>${{ formatMonthlyCost (index $costs "monthly_rate") }}</td>
                             <td>${{ formatYearlyCost (index $costs "yearly_rate") }}</td>
                             <td>
-                                {{ if or (eq $resourceType "Elastic IPs") (eq $resourceType "Load Balancers") }}
+                                {{ if (eq $resourceType "Elastic IPs") }}
                                     <span class="tooltip">N/A<span class="tooltiptext">Lifetime cost not applicable for this resource type</span></span>
                                 {{ else }}
                                     ${{ formatLifetimeCost (index $costs "lifetime") }}
@@ -247,7 +247,7 @@
                                 {{ $totalDaily = add $totalDaily (index $costs "daily_rate") }}
                                 {{ $totalMonthly = add $totalMonthly (index $costs "monthly_rate") }}
                                 {{ $totalYearly = add $totalYearly (index $costs "yearly_rate") }}
-                                {{ if not (or (eq $resourceType "Elastic IPs") (eq $resourceType "Load Balancers")) }}
+                                {{ if not (eq $resourceType "Elastic IPs") }}
                                     {{ $totalLifetime = add $totalLifetime (index $costs "lifetime") }}
                                 {{ end }}
                             {{ end }}
