@@ -343,7 +343,23 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 							"instance_id": aws.StringValue(instanceCopy.InstanceId),
 							"name":        name,
 						})
-						reasons = append(reasons, "Instance is stopped")
+						
+						// Get stop time from state transition reason
+						if instanceCopy.StateTransitionReason != nil {
+							// AWS format: "User initiated (2024-02-27 11:51:43 GMT)"
+							reason := aws.StringValue(instanceCopy.StateTransitionReason)
+							if strings.Contains(reason, "(") && strings.Contains(reason, ")") {
+								timeStr := strings.TrimSpace(strings.Split(strings.Split(reason, "(")[1], ")")[0])
+								if stopTime, err := time.Parse("2006-01-02 15:04:05 MST", timeStr); err == nil {
+									stoppedDuration := time.Since(stopTime)
+									stoppedDays := int(stoppedDuration.Hours() / 24)
+									if stoppedDays >= opts.DaysUnused {
+										stoppedAgeStr := awslib.FormatTimeDifference(time.Now(), &stopTime)
+										reasons = append(reasons, fmt.Sprintf("Instance has been stopped for %s", stoppedAgeStr))
+									}
+								}
+							}
+						}
 					} else if aws.StringValue(instanceCopy.State.Name) != "running" {
 						reasons = append(reasons, fmt.Sprintf("Non-running state: %s", aws.StringValue(instanceCopy.State.Name)))
 					} else {
