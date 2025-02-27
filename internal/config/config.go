@@ -51,6 +51,9 @@ type GlobalConfig struct {
 
 	// ScanIgnoreTags is the map of tags to ignore
 	ScanIgnoreTags map[string]string
+
+	// ScanAccounts is the list of account IDs to scan
+	ScanAccounts []string
 }
 
 // Config is the global configuration instance
