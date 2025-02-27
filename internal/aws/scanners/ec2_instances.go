@@ -573,6 +573,8 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	return results, nil
 }
 
+// roundCost rounds a cost value to 2 decimal places
+// nolint:unused
 func roundCost(cost float64) float64 {
 	return math.Round(cost*100) / 100
 }

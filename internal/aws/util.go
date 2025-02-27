@@ -53,5 +53,8 @@ func FormatTimeDifference(now time.Time, lastUsed *time.Time) string {
 		}
 	}
 
-	return fmt.Sprintf("%s", strings.Join(parts, " "))
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
 }
