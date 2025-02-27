@@ -82,6 +82,7 @@ h1 {
 #unused-resources {
     flex: 0 0 100%;
     max-width: 100%;
+    overflow-x: hidden;
     margin-top: 2rem;
 }
 
@@ -178,9 +179,8 @@ h1 {
     color: white;
 }
 
-/* Table Styling */
+/* General Table Styling */
 table {
-    table-layout: fixed;
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
@@ -190,74 +190,56 @@ table {
     margin-bottom: 0;
 }
 
-.wide table {
-    font-size: 0.9rem;
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: var(--border-radius);
 }
 
 th, td {
     padding: 0.75rem 1rem;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-}
-
-.wide th, .wide td {
-    padding: 0.75rem;
 }
 
 th {
     background-color: var(--accent-light);
     font-weight: 600;
     color: var(--accent);
+}
+
+/* Scan table styles */
+#scan-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+#scan-table th {
     white-space: nowrap;
 }
 
-td {
-    color: var(--text-secondary);
-    min-width: 150px;
-    max-width: none;
+#scan-table td {
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
-td:first-child {
-    width: 200px;
+/* Prevent wrapping for specific columns */
+#scan-table td:nth-child(2),
+#scan-table td:nth-child(3),
+#scan-table td:nth-child(6) {
+    white-space: nowrap;
 }
 
-tr:last-child td {
-    border-bottom: none;
-}
-
-.total-row {
-    font-weight: bold;
-    background-color: var(--accent-light);
-    border-top: 2px solid var(--accent);
-}
-
-.total-row td {
-    padding: 1rem 0.75rem !important;
-    color: var(--accent);
-}
-
-/* Table wrapper for horizontal scrolling on mobile */
-.table-wrapper {
-    width: 100%;
-    overflow-x: auto;
-    border-radius: var(--border-radius);
-    -webkit-overflow-scrolling: touch;
-}
-
-/* Specific styles for #scan-table */
-#scan-table {
-    table-layout: auto;
-    width: 100%;
-}
-
-#scan-table .table-wrapper {
-    overflow-x: auto;
-    margin: 0 -1.5rem;
-    padding: 0 1.5rem;
-}
+/* Column widths */
+#scan-table th:nth-child(1), #scan-table td:nth-child(1) { width: 8%; }   /* Account ID */
+#scan-table th:nth-child(2), #scan-table td:nth-child(2) { width: 15%; }  /* Account Name */
+#scan-table th:nth-child(3), #scan-table td:nth-child(3) { width: 9%; }   /* Resource Type */
+#scan-table th:nth-child(4), #scan-table td:nth-child(4) { width: 15%; }  /* Name */
+#scan-table th:nth-child(5), #scan-table td:nth-child(5) { width: 25%; }  /* Resource ID */
+#scan-table th:nth-child(6), #scan-table td:nth-child(6) { width: 7%; }   /* Region */
+#scan-table th:nth-child(7), #scan-table td:nth-child(7) { width: 13%; }  /* Reason */
+#scan-table th:nth-child(8), #scan-table td:nth-child(8) { width: 8%; }   /* Actions */
 
 /* Search Input Styling */
 .input-container {
