@@ -105,6 +105,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 
 	age := t.now.Sub(creationDate)
 	ageInDays := int(age.Hours() / 24)
+	ageString := awslib.FormatTimeDifference(t.now, &creationDate)
 
 	// Skip if AMI is not old enough
 	if ageInDays < t.opts.DaysUnused {
@@ -229,8 +230,8 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		resourceName = name
 	}
 
-	reason := fmt.Sprintf("AMI has not been used by any instances for %d days and has %.2f GB in associated snapshots", 
-		ageInDays, float64(totalSnapshotSize))
+	reason := fmt.Sprintf("AMI has not been used by any instances for %s and has %.2f GB in associated snapshots", 
+		ageString, float64(totalSnapshotSize))
 
 	return &awslib.ScanResult{
 		ResourceType: t.scanner.Label(),
