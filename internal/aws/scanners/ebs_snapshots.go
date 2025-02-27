@@ -165,6 +165,11 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				}
 			}
 
+			// Calculate age of snapshot
+			age := time.Since(*snapshot.StartTime)
+			ageInDays := int(age.Hours() / 24)
+			ageString := awslib.FormatTimeDifference(time.Now(), snapshot.StartTime)
+
 			details := map[string]interface{}{
 				"snapshot_id":            aws.StringValue(snapshot.SnapshotId),
 				"description":            aws.StringValue(snapshot.Description),
@@ -193,10 +198,8 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 			reasons := []string{}
 			// Check for old snapshots
-			age := time.Since(*snapshot.StartTime)
-			ageInDays := int(age.Hours() / 24)
 			if ageInDays > opts.DaysUnused {
-				reasons = append(reasons, fmt.Sprintf("Snapshot is older than %d days.", opts.DaysUnused))
+				reasons = append(reasons, fmt.Sprintf("Snapshot is %s old.", ageString))
 			}
 
 			// Check for snapshots of deleted volumes
