@@ -234,13 +234,13 @@ func (s *IAMRoleScanner) calculateAgeString(now time.Time, t *time.Time) string 
 	days := int(duration.Hours() / 24)
 
 	if days < 30 {
-		return fmt.Sprintf("%d days ago", days)
+		return fmt.Sprintf("%d days", days)
 	} else if days < 365 {
 		months := days / 30
-		return fmt.Sprintf("%d months ago", months)
+		return fmt.Sprintf("%d months", months)
 	}
 	years := days / 365
-	return fmt.Sprintf("%d years ago", years)
+	return fmt.Sprintf("%d years", years)
 }
 
 // determineUnusedReasons determines why a role is considered unused

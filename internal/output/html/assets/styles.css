@@ -122,6 +122,66 @@ h1 {
     color: var(--accent);
 }
 
+/* Table Styles */
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: var(--border-radius);
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: var(--card-bg);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+th, td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+th {
+    background-color: var(--accent-light);
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+}
+
+/* Scan Table Specific Styles */
+#scan-table {
+    table-layout: fixed;
+}
+
+#scan-table td {
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Non-wrapping columns */
+#scan-table td:nth-child(2),
+#scan-table td:nth-child(3),
+#scan-table td:nth-child(6) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Column widths */
+#scan-table th:nth-child(1), #scan-table td:nth-child(1) { width: 8%; }   /* Account ID */
+#scan-table th:nth-child(2), #scan-table td:nth-child(2) { width: 15%; }  /* Account Name */
+#scan-table th:nth-child(3), #scan-table td:nth-child(3) { width: 9%; }   /* Resource Type */
+#scan-table th:nth-child(4), #scan-table td:nth-child(4) { width: 15%; }  /* Name */
+#scan-table th:nth-child(5), #scan-table td:nth-child(5) { width: 25%; }  /* Resource ID */
+#scan-table th:nth-child(6), #scan-table td:nth-child(6) { width: 7%; }   /* Region */
+#scan-table th:nth-child(7), #scan-table td:nth-child(7) { width: 13%; }  /* Reason */
+#scan-table th:nth-child(8), #scan-table td:nth-child(8) { width: 8%; }   /* Actions */
+
 /* Chart Container */
 .chart-container {
     flex: 1;
@@ -178,68 +238,6 @@ h1 {
     background: rgb(60, 52, 156);
     color: white;
 }
-
-/* General Table Styling */
-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    background-color: var(--card-bg);
-    border-radius: var(--border-radius);
-    overflow: hidden;
-    margin-bottom: 0;
-}
-
-.table-wrapper {
-    width: 100%;
-    overflow-x: auto;
-    border-radius: var(--border-radius);
-}
-
-th, td {
-    padding: 0.75rem 1rem;
-    text-align: left;
-    border-bottom: 1px solid var(--border-color);
-}
-
-th {
-    background-color: var(--accent-light);
-    font-weight: 600;
-    color: var(--accent);
-}
-
-/* Scan table styles */
-#scan-table {
-    table-layout: fixed;
-    width: 100%;
-}
-
-#scan-table th {
-    white-space: nowrap;
-}
-
-#scan-table td {
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-}
-
-/* Prevent wrapping for specific columns */
-#scan-table td:nth-child(2),
-#scan-table td:nth-child(3),
-#scan-table td:nth-child(6) {
-    white-space: nowrap;
-}
-
-/* Column widths */
-#scan-table th:nth-child(1), #scan-table td:nth-child(1) { width: 8%; }   /* Account ID */
-#scan-table th:nth-child(2), #scan-table td:nth-child(2) { width: 15%; }  /* Account Name */
-#scan-table th:nth-child(3), #scan-table td:nth-child(3) { width: 9%; }   /* Resource Type */
-#scan-table th:nth-child(4), #scan-table td:nth-child(4) { width: 15%; }  /* Name */
-#scan-table th:nth-child(5), #scan-table td:nth-child(5) { width: 25%; }  /* Resource ID */
-#scan-table th:nth-child(6), #scan-table td:nth-child(6) { width: 7%; }   /* Region */
-#scan-table th:nth-child(7), #scan-table td:nth-child(7) { width: 13%; }  /* Reason */
-#scan-table th:nth-child(8), #scan-table td:nth-child(8) { width: 8%; }   /* Actions */
 
 /* Search Input Styling */
 .input-container {
