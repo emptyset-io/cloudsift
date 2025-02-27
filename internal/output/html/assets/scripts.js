@@ -2,7 +2,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     initializeCharts();
     initializeSortableTables();
-    addTooltipsForNA();
     setupModalListeners();
     setupCostPeriodSelector();
     displayLocalReportTime();
@@ -228,6 +227,7 @@ function initializeSortableTables() {
         const headers = table.querySelectorAll('th');
         headers.forEach((header, index) => {
             if (header.querySelector('.sort-icon')) {
+                header.style.cursor = 'pointer';
                 header.addEventListener('click', () => sortTable(table, index));
             }
         });
@@ -339,10 +339,10 @@ function scrollToUnusedResources(event, resourceType) {
 // Modal Functions
 function showDetailsModal(details) {
     const modal = document.getElementById('details-modal');
-    const jsonContent = document.getElementById('json-content');
+    const modalContent = document.getElementById('modal-content');
     
     // Format the JSON nicely
-    jsonContent.textContent = JSON.stringify(details, null, 2);
+    modalContent.textContent = JSON.stringify(details, null, 2);
     
     modal.style.display = 'block';
 }
@@ -355,7 +355,7 @@ window.onclick = function(event) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+function setupModalListeners() {
     const closeModals = document.querySelectorAll('.close-modal');
     closeModals.forEach(function(closeModal) {
         closeModal.addEventListener('click', function() {
@@ -363,91 +363,29 @@ document.addEventListener('DOMContentLoaded', function() {
             modal.style.display = 'none';
         });
     });
-});
-
-function setupModalListeners() {
-    // Close modal when clicking the close button
-    const closeBtn = document.querySelector('.close-modal');
-    if (closeBtn) {
-        closeBtn.onclick = function() {
-            const modal = document.getElementById('details-modal');
-            modal.style.display = 'none';
-        };
-    }
-}
-
-// Add tooltips for N/A values
-function addTooltipsForNA() {
-    const tooltips = document.querySelectorAll('.tooltip');
-    tooltips.forEach(tooltip => {
-        const tooltipText = tooltip.querySelector('.tooltiptext');
-        if (tooltipText) {
-            tooltip.addEventListener('mouseenter', () => {
-                tooltipText.style.visibility = 'visible';
-                tooltipText.style.opacity = '1';
-            });
-            tooltip.addEventListener('mouseleave', () => {
-                tooltipText.style.visibility = 'hidden';
-                tooltipText.style.opacity = '0';
-            });
-        }
-    });
-}
-
-// Convert UTC time to the user's local timezone and display
-function convertToLocalTime(utcTimeString) {
-    const utcDate = new Date(utcTimeString);
-    const localDate = utcDate.toLocaleString(); // Convert to local timezone format
-    return localDate;
-}
-
-// Set the generated report time in the local timezone
-function displayLocalReportTime() {
-    const reportTimeElement = document.getElementById('generated-time');
-    
-    if (reportTimeElement) {
-        const utcTime = reportTimeElement.getAttribute('data-utc-time');
-        const localTime = convertToLocalTime(utcTime * 1000); // Convert seconds to milliseconds
-        reportTimeElement.textContent = `${localTime}`;
-    }
 }
 
 // Filter resources based on account, region, or resource type
 function filterResources(filterType, value) {
-    // Get the resources table
-    const table = document.getElementById('unused-resources');
+    const table = document.getElementById('unused-resources-table');
     if (!table) return;
 
     const rows = table.getElementsByTagName('tr');
-    let filterColumn;
-    
-    switch(filterType) {
-        case 'account':
-            filterColumn = 0; // Account column
-            break;
-        case 'region':
-            filterColumn = 1; // Region column
-            break;
-        case 'type':
-            filterColumn = 2; // Resource Type column
-            break;
-        default:
-            return;
-    }
+    const columnMap = {
+        'account': 0,
+        'region': 1,
+        'type': 2
+    };
 
-    // Scroll to the resources section
-    document.getElementById('unused-resources-section').scrollIntoView({ behavior: 'smooth' });
+    const columnIndex = columnMap[filterType];
+    if (columnIndex === undefined) return;
 
-    // Clear any existing highlights
     for (let i = 1; i < rows.length; i++) {
-        rows[i].classList.remove('highlighted');
-    }
-
-    // Highlight matching rows
-    for (let i = 1; i < rows.length; i++) {
-        const cell = rows[i].getElementsByTagName('td')[filterColumn];
-        if (cell && cell.textContent.trim() === value) {
-            rows[i].classList.add('highlighted');
+        const row = rows[i];
+        const cell = row.getElementsByTagName('td')[columnIndex];
+        if (cell) {
+            const cellText = cell.textContent || cell.innerText;
+            row.style.display = cellText.includes(value) ? '' : 'none';
         }
     }
 }
@@ -486,4 +424,22 @@ function exportToCSV() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+// Convert UTC time to the user's local timezone and display
+function convertToLocalTime(utcTimeString) {
+    const utcDate = new Date(utcTimeString);
+    const localDate = utcDate.toLocaleString(); // Convert to local timezone format
+    return localDate;
+}
+
+// Set the generated report time in the local timezone
+function displayLocalReportTime() {
+    const reportTimeElement = document.getElementById('generated-time');
+    
+    if (reportTimeElement) {
+        const utcTime = reportTimeElement.getAttribute('data-utc-time');
+        const localTime = convertToLocalTime(utcTime * 1000); // Convert seconds to milliseconds
+        reportTimeElement.textContent = `${localTime}`;
+    }
 }
