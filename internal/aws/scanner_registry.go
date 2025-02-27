@@ -13,6 +13,7 @@ type ScanOptions struct {
 	Region     string           // Region to scan
 	DaysUnused int              // Number of days a resource must be unused to be reported
 	Session    *session.Session // AWS session to use for scanning (already configured with necessary role chain)
+	AccountID  string          // AWS Account ID for the session
 }
 
 // Scanner interface defines methods that must be implemented by resource scanners

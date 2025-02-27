@@ -5,7 +5,6 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -43,13 +42,6 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			"region": opts.Region,
 		})
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
-	}
-
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
 	// Create EC2 client
@@ -94,7 +86,7 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			})
 			if err != nil {
 				logging.Error("Failed to calculate costs", err, map[string]interface{}{
-					"account_id":    accountID,
+					"account_id":    opts.AccountID,
 					"region":        opts.Region,
 					"resource_name": resourceName,
 					"resource_id":   allocationID,
@@ -107,7 +99,7 @@ func (s *ElasticIPScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				ResourceID:   allocationID,
 				Reason:       "Not associated with any resource",
 				Details: map[string]interface{}{
-					"account_id":               accountID,
+					"account_id":               opts.AccountID,
 					"region":                   opts.Region,
 					"public_ip":                publicIP,
 					"allocation_id":            allocationID,

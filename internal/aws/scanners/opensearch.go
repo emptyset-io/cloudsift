@@ -173,13 +173,6 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create service clients
 	esClient := opensearchservice.New(sess)
 	cwClient := cloudwatch.New(sess)
@@ -263,7 +256,7 @@ func (s *OpenSearchScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				"IndexRate":      metrics["index_rate"],
 				"DocumentCount":  metrics["doc_count"],
 				"JVMMemory":      metrics["jvm_memory"],
-				"AccountId":      accountID,
+				"opts.AccountID": opts.AccountID,
 				"Region":         opts.Region,
 			}
 

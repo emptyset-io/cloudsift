@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -70,13 +69,6 @@ func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create EC2 service client
 	ec2Client := ec2.New(sess)
 
@@ -139,7 +131,7 @@ func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				ResourceID:   vpcID,
 				Reason:       "VPC has no resources",
 				Details: map[string]interface{}{
-					"account_id":     accountID,
+					"account_id":     opts.AccountID,
 					"region":         opts.Region,
 					"cidr_block":     aws.StringValue(vpc.CidrBlock),
 					"is_default":     isDefault,

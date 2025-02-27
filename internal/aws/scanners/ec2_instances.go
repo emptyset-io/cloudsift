@@ -249,13 +249,6 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Initialize metrics
 	var totalInstances int
 	var costCalculations int
@@ -263,7 +256,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	// Log scan start
 	logging.Info("Starting EC2 instance scan", map[string]interface{}{
-		"account_id": accountID,
+		"account_id": opts.AccountID,
 		"region":     opts.Region,
 	})
 
@@ -290,7 +283,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	err = ec2Client.DescribeInstancesPages(input, func(page *ec2.DescribeInstancesOutput, lastPage bool) bool {
 		// Log page processing
 		logging.Debug("Processing instance page", map[string]interface{}{
-			"account_id":   accountID,
+			"account_id":   opts.AccountID,
 			"region":       opts.Region,
 			"reservations": len(page.Reservations),
 			"is_last_page": lastPage,
@@ -550,7 +543,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	if err != nil {
 		logging.Error("Failed to describe instances", err, map[string]interface{}{
-			"account_id": accountID,
+			"account_id": opts.AccountID,
 			"region":     opts.Region,
 		})
 		return nil, fmt.Errorf("failed to describe instances: %w", err)
@@ -562,7 +555,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 	// Log scan completion with metrics
 	scanDuration := time.Since(startTime)
 	logging.Info("Completed EC2 instance scan", map[string]interface{}{
-		"account_id":        accountID,
+		"account_id":        opts.AccountID,
 		"region":            opts.Region,
 		"total_instances":   totalInstances,
 		"unused_instances":  len(results),

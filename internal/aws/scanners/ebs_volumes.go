@@ -47,13 +47,6 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create service clients
 	clients := utils.CreateServiceClients(sess)
 	svc := ec2.New(sess) // Keep direct EC2 client for backward compatibility
@@ -65,7 +58,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 	// Log scan start
 	logging.Info("Starting EBS volume scan", map[string]interface{}{
-		"account_id": accountID,
+		"account_id": opts.AccountID,
 		"region":     opts.Region,
 	})
 
@@ -77,7 +70,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	err = svc.DescribeVolumesPages(input, func(page *ec2.DescribeVolumesOutput, lastPage bool) bool {
 		// Log page processing
 		logging.Debug("Processing volume page", map[string]interface{}{
-			"account_id":   accountID,
+			"account_id":   opts.AccountID,
 			"region":       opts.Region,
 			"page_size":    len(page.Volumes),
 			"is_last_page": lastPage,
@@ -177,32 +170,32 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			details := map[string]interface{}{
 				// Resource identifiers
-				"account_id":    accountID,
-				"region":        opts.Region,
-				"volume_id":     aws.StringValue(volume.VolumeId),
-				"snapshot_id":   aws.StringValue(volume.SnapshotId),
-				"tags":         tags,
-				"reason":       fmt.Sprintf("Volume has not been used in %s", ageString),
+				"account_id":  opts.AccountID,
+				"region":      opts.Region,
+				"volume_id":   aws.StringValue(volume.VolumeId),
+				"snapshot_id": aws.StringValue(volume.SnapshotId),
+				"tags":        tags,
+				"reason":      fmt.Sprintf("Volume has not been used in %s", ageString),
 				// Volume configuration
 				"volume_type":          aws.StringValue(volume.VolumeType),
-				"size_gb":             aws.Int64Value(volume.Size),
-				"iops":                aws.Int64Value(volume.Iops),
-				"throughput":          aws.Int64Value(volume.Throughput),
-				"encrypted":           aws.BoolValue(volume.Encrypted),
-				"kms_key_id":          aws.StringValue(volume.KmsKeyId),
+				"size_gb":              aws.Int64Value(volume.Size),
+				"iops":                 aws.Int64Value(volume.Iops),
+				"throughput":           aws.Int64Value(volume.Throughput),
+				"encrypted":            aws.BoolValue(volume.Encrypted),
+				"kms_key_id":           aws.StringValue(volume.KmsKeyId),
 				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
 
 				// Location info
 				"availability_zone": aws.StringValue(volume.AvailabilityZone),
-				"outpost_arn":      aws.StringValue(volume.OutpostArn),
+				"outpost_arn":       aws.StringValue(volume.OutpostArn),
 
 				// Status and timing
-				"state":              aws.StringValue(volume.State),
-				"created":            volume.CreateTime.Format(time.RFC3339),
-				"age_days":           unusedDays,
+				"state":    aws.StringValue(volume.State),
+				"created":  volume.CreateTime.Format(time.RFC3339),
+				"age_days": unusedDays,
 				"attachment_history": map[string]interface{}{
 					"currently_attached": isCurrentlyAttached,
-					"has_history":       hasAttachmentHistory,
+					"has_history":        hasAttachmentHistory,
 				},
 				"fast_restored": aws.BoolValue(volume.FastRestored),
 			}
@@ -211,18 +204,18 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			if len(statusResp.VolumeStatuses) > 0 {
 				status := statusResp.VolumeStatuses[0]
 				volumeStatus := map[string]interface{}{
-					"status":                aws.StringValue(status.VolumeStatus.Status),
-					"details":               status.VolumeStatus.Details,
-					"availability_zone":     aws.StringValue(status.AvailabilityZone),
+					"status":            aws.StringValue(status.VolumeStatus.Status),
+					"details":           status.VolumeStatus.Details,
+					"availability_zone": aws.StringValue(status.AvailabilityZone),
 				}
 
 				if status.Events != nil {
 					var events []map[string]interface{}
 					for _, event := range status.Events {
 						eventMap := map[string]interface{}{
-							"event_type":    aws.StringValue(event.EventType),
-							"description":   aws.StringValue(event.Description),
-							"event_id":      aws.StringValue(event.EventId),
+							"event_type":  aws.StringValue(event.EventType),
+							"description": aws.StringValue(event.Description),
+							"event_id":    aws.StringValue(event.EventId),
 						}
 						if event.NotBefore != nil {
 							eventMap["not_before"] = event.NotBefore.Format(time.RFC3339)
@@ -335,7 +328,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				})
 				if err != nil {
 					logging.Error("Failed to calculate costs", err, map[string]interface{}{
-						"account_id":    accountID,
+						"account_id":    opts.AccountID,
 						"region":        opts.Region,
 						"resource_name": resourceName,
 						"resource_id":   aws.StringValue(volume.VolumeId),
@@ -358,7 +351,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			// Collect all relevant details
 			attachmentHistory := map[string]interface{}{
 				"currently_attached": isCurrentlyAttached,
-				"has_history":       hasAttachmentHistory,
+				"has_history":        hasAttachmentHistory,
 			}
 			if lastAttachTime != nil {
 				attachmentHistory["last_attach_time"] = lastAttachTime.Format(time.RFC3339)
@@ -372,10 +365,10 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			var attachments []map[string]interface{}
 			for _, att := range volume.Attachments {
 				attachment := map[string]interface{}{
-					"instance_id":  aws.StringValue(att.InstanceId),
-					"device":       aws.StringValue(att.Device),
-					"state":        aws.StringValue(att.State),
-					"attach_time":  att.AttachTime.Format(time.RFC3339),
+					"instance_id":           aws.StringValue(att.InstanceId),
+					"device":                aws.StringValue(att.Device),
+					"state":                 aws.StringValue(att.State),
+					"attach_time":           att.AttachTime.Format(time.RFC3339),
 					"delete_on_termination": aws.BoolValue(att.DeleteOnTermination),
 				}
 				attachments = append(attachments, attachment)
@@ -400,7 +393,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			// Log individual result
 			logging.Info("Found unused EBS volume", map[string]interface{}{
-				"account_id":    accountID,
+				"account_id":    opts.AccountID,
 				"region":        opts.Region,
 				"resource_name": resourceName,
 				"resource_id":   aws.StringValue(volume.VolumeId),
@@ -412,7 +405,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 	if err != nil {
 		logging.Error("Failed to describe volumes", err, map[string]interface{}{
-			"account_id": accountID,
+			"account_id": opts.AccountID,
 			"region":     opts.Region,
 		})
 		return nil, fmt.Errorf("failed to describe volumes: %w", err)
@@ -421,7 +414,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 	// Log scan completion with metrics
 	scanDuration := time.Since(startTime)
 	logging.Info("Completed EBS volume scan", map[string]interface{}{
-		"account_id":        accountID,
+		"account_id":        opts.AccountID,
 		"region":            opts.Region,
 		"total_volumes":     totalVolumes,
 		"unused_volumes":    len(results),

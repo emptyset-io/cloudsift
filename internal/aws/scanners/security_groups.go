@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -42,13 +41,6 @@ func (s *SecurityGroupScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults
 			"region": opts.Region,
 		})
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
-	}
-
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
 	}
 
 	// Create EC2 client
@@ -120,11 +112,11 @@ func (s *SecurityGroupScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults
 
 			// Create comprehensive details map
 			details := map[string]interface{}{
-				"GroupName": sgName,
-				"AccountId": accountID,
-				"Region":    opts.Region,
-				"VpcId":     aws.StringValue(sg.VpcId),
-				"GroupDesc": aws.StringValue(sg.Description),
+				"GroupName":      sgName,
+				"opts.AccountID": opts.AccountID,
+				"Region":         opts.Region,
+				"VpcId":          aws.StringValue(sg.VpcId),
+				"GroupDesc":      aws.StringValue(sg.Description),
 			}
 
 			// Add inbound rules analysis
