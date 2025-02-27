@@ -53,5 +53,5 @@ func FormatTimeDifference(now time.Time, lastUsed *time.Time) string {
 		}
 	}
 
-	return fmt.Sprintf("has not been used in %s", strings.Join(parts, " "))
+	return fmt.Sprintf("%s", strings.Join(parts, " "))
 }

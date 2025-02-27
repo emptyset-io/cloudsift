@@ -149,22 +149,25 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 
 			// If we have no attachment history and volume is old, it's likely never been attached
 			// Otherwise use the last detach time to determine unused period
-			var unusedDuration time.Duration
+			var lastUsedTime *time.Time
 			if !hasAttachmentHistory {
 				// For volumes that have never been attached, use creation time
-				unusedDuration = time.Since(*volume.CreateTime)
+				lastUsedTime = volume.CreateTime
 			} else if lastDetachTime != nil {
-				unusedDuration = time.Since(*lastDetachTime)
+				lastUsedTime = lastDetachTime
 			} else {
 				// If we have attachment history but no detach time, something's wrong
 				// Be conservative and skip this volume
 				continue
 			}
 
+			unusedDuration := time.Since(*lastUsedTime)
 			unusedDays := int(unusedDuration.Hours() / 24)
 			if unusedDays < opts.DaysUnused {
 				continue
 			}
+
+			ageString := awslib.FormatTimeDifference(time.Now(), lastUsedTime)
 
 			// Convert AWS tags to map
 			tags := make(map[string]string)
@@ -179,7 +182,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				"volume_id":     aws.StringValue(volume.VolumeId),
 				"snapshot_id":   aws.StringValue(volume.SnapshotId),
 				"tags":         tags,
-				"reason":       fmt.Sprintf("Volume is unattached and %d days old.", unusedDays),
+				"reason":       fmt.Sprintf("Volume has not been used in %s", ageString),
 				// Volume configuration
 				"volume_type":          aws.StringValue(volume.VolumeType),
 				"size_gb":             aws.Int64Value(volume.Size),
@@ -269,7 +272,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			var unusedReasons []string
 
 			// Add attachment status to reasons
-			unusedReasons = append(unusedReasons, fmt.Sprintf("Volume is unattached and %d days old.", unusedDays))
+			unusedReasons = append(unusedReasons, fmt.Sprintf("Volume has not been used in %s", ageString))
 
 			// Check metrics for activity with thresholds
 			const minActivityThreshold = 1.0 // Minimum ops/day to consider active
