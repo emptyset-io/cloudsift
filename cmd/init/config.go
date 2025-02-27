@@ -38,6 +38,11 @@ scan:
    # - ec2-instances  # Example scanner
    # - ebs-volumes   # Example scanner
   
+  # List of AWS account IDs to scan (default: all accounts in organization)
+  accounts:
+   # - 123456789012  # Example account ID
+   # - 098765432109  # Example account ID
+  
   output: filesystem  # Output type (filesystem or s3)
   output_format: html  # Output format (json or html)
   bucket: ""  # S3 bucket name (required when output=s3)

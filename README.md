@@ -274,6 +274,7 @@ cloudsift scan -c /path/to/config.yaml
 | `--profile` | AWS profile to use | `default` |
 | `--regions` | Comma-separated list of regions | All regions |
 | `--scanners` | Comma-separated list of scanners | All scanners |
+| `--accounts` | Comma-separated list of account IDs to scan | `""` (all accounts) |
 | `--output` | Output type (filesystem, s3) | `filesystem` |
 | `--output-format, -o` | Output format (json, html) | `html` |
 | `--bucket` | S3 bucket for output | `""` |
@@ -298,6 +299,7 @@ All configuration options can be set via environment variables with the `CLOUDSI
 | `CLOUDSIFT_APP_LOG_LEVEL` | Log level (DEBUG/INFO/WARN/ERROR) | `INFO` |
 | `CLOUDSIFT_SCAN_REGIONS` | Comma-separated list of regions | `""` (all regions) |
 | `CLOUDSIFT_SCAN_SCANNERS` | Comma-separated list of scanners | `""` (all scanners) |
+| `CLOUDSIFT_SCAN_ACCOUNTS` | Comma-separated list of account IDs | `""` (all accounts) |
 | `CLOUDSIFT_SCAN_OUTPUT` | Output type (filesystem/s3) | `filesystem` |
 | `CLOUDSIFT_SCAN_OUTPUT_FORMAT` | Output format (json/html) | `html` |
 | `CLOUDSIFT_SCAN_BUCKET` | S3 bucket for output | `""` |
@@ -334,6 +336,9 @@ scan:
   scanners: # Leaving this list empty will execute all scanners
     - ebs-volumes
     - ec2-instances
+  accounts: # Leaving this list empty will scan all accounts
+    - 123456789012
+    - 098765432109
   output: filesystem
   output_format: html
   bucket: ""

@@ -41,6 +41,7 @@ type scanOptions struct {
 	ignoreResourceIDs   string
 	ignoreResourceNames string
 	ignoreTags          string
+	accounts            string // Comma-separated list of account IDs to scan
 }
 
 type scannerProgress struct {
@@ -113,6 +114,7 @@ func NewScanCmd() *cobra.Command {
 When no scanners or regions are specified, all available scanners will be run in all available regions.
 When no organization-role is specified, only the current account will be scanned.
 When both organization-role and scanner-role are specified, all accounts in the organization will be scanned.
+When accounts is specified, only the specified accounts will be scanned. The accounts must exist in the organization.
 
 Examples:
   # Scan all resources in all regions of current account
@@ -123,6 +125,9 @@ Examples:
 
   # Scan multiple resource types in multiple regions of all organization accounts
   cloudsift scan --scanners ebs-volumes,ebs-snapshots --regions us-west-2,us-east-1 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole
+
+  # Scan specific accounts in the organization
+  cloudsift scan --accounts 123456789012,098765432109 --organization-role OrganizationAccessRole --scanner-role SecurityAuditRole
 
   # Output HTML report to S3
   cloudsift scan --output s3 --output-format html --bucket my-bucket --bucket-region us-west-2
@@ -174,6 +179,9 @@ Examples:
 				}
 				config.Config.ScanIgnoreTags = tags
 			}
+			if cmd.Flags().Changed("accounts") {
+				config.Config.ScanAccounts = strings.Split(opts.accounts, ",")
+			}
 
 			// Bind scan-specific flags to viper
 			if err := viper.BindPFlag("scan.regions", cmd.Flags().Lookup("regions")); err != nil {
@@ -204,6 +212,9 @@ Examples:
 				return err
 			}
 			if err := viper.BindPFlag("scan.ignore.tags", cmd.Flags().Lookup("ignore-tags")); err != nil {
+				return err
+			}
+			if err := viper.BindPFlag("scan.accounts", cmd.Flags().Lookup("accounts")); err != nil {
 				return err
 			}
 
@@ -252,6 +263,7 @@ Examples:
 	cmd.Flags().StringVar(&opts.ignoreResourceIDs, "ignore-resource-ids", "", "Comma-separated list of resource IDs to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreResourceNames, "ignore-resource-names", "", "Comma-separated list of resource names to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreTags, "ignore-tags", "", "Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)")
+	cmd.Flags().StringVar(&opts.accounts, "accounts", "", "Comma-separated list of account IDs to scan (default: all accounts in organization)")
 
 	return cmd
 }
@@ -392,6 +404,46 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		if err != nil {
 			logging.Error("Failed to get current account", err, nil)
 			return nil // Return nil to continue without failing
+		}
+	}
+
+	// Filter accounts by specified account IDs
+	if opts.accounts != "" {
+		requestedAccounts := strings.Split(opts.accounts, ",")
+		accountMap := make(map[string]bool)
+		for _, account := range accounts {
+			accountMap[account.ID] = true
+		}
+
+		// Validate all requested accounts exist
+		var invalidAccounts []string
+		for _, accountID := range requestedAccounts {
+			accountID = strings.TrimSpace(accountID)
+			if !accountMap[accountID] {
+				invalidAccounts = append(invalidAccounts, accountID)
+			}
+		}
+		if len(invalidAccounts) > 0 {
+			logging.Warn("Some requested accounts do not exist in the organization", map[string]interface{}{
+				"invalid_accounts": invalidAccounts,
+			})
+		}
+
+		// Filter to only requested accounts
+		var filteredAccounts []awsinternal.Account
+		requestedAccountMap := make(map[string]bool)
+		for _, accountID := range requestedAccounts {
+			requestedAccountMap[strings.TrimSpace(accountID)] = true
+		}
+		for _, account := range accounts {
+			if requestedAccountMap[account.ID] {
+				filteredAccounts = append(filteredAccounts, account)
+			}
+		}
+		accounts = filteredAccounts
+
+		if len(accounts) == 0 {
+			return fmt.Errorf("none of the specified accounts exist in the organization")
 		}
 	}
 

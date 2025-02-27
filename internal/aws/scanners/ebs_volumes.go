@@ -95,8 +95,132 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				continue
 			}
 
-			// Skip if volume is attached
-			if len(volume.Attachments) > 0 {
+			// Check current attachment status and history
+			isCurrentlyAttached := len(volume.Attachments) > 0
+			var lastAttachTime *time.Time
+			var lastDetachTime *time.Time
+			hasAttachmentHistory := false
+
+			// Get last attach time from current attachments
+			for _, attachment := range volume.Attachments {
+				if attachment.AttachTime != nil {
+					hasAttachmentHistory = true
+					if lastAttachTime == nil || attachment.AttachTime.After(*lastAttachTime) {
+						lastAttachTime = attachment.AttachTime
+					}
+				}
+			}
+
+			// Get volume status history
+			statusInput := &ec2.DescribeVolumeStatusInput{
+				VolumeIds: []*string{volume.VolumeId},
+				Filters: []*ec2.Filter{
+					{
+						Name:   aws.String("event-type"),
+						Values: []*string{aws.String("attaching"), aws.String("detaching")},
+					},
+				},
+			}
+			statusResp, err := svc.DescribeVolumeStatus(statusInput)
+			if err == nil && len(statusResp.VolumeStatuses) > 0 {
+				status := statusResp.VolumeStatuses[0]
+				if status.Events != nil {
+					for _, event := range status.Events {
+						eventType := aws.StringValue(event.EventType)
+						if eventType == "attaching" && event.NotBefore != nil {
+							hasAttachmentHistory = true
+							if lastAttachTime == nil || event.NotBefore.After(*lastAttachTime) {
+								lastAttachTime = event.NotBefore
+							}
+						} else if eventType == "detaching" && event.NotAfter != nil {
+							hasAttachmentHistory = true
+							if lastDetachTime == nil || event.NotAfter.After(*lastDetachTime) {
+								lastDetachTime = event.NotAfter
+							}
+						}
+					}
+				}
+			}
+
+			// Skip if currently attached
+			if isCurrentlyAttached {
+				continue
+			}
+
+			// If we have no attachment history and volume is old, it's likely never been attached
+			// Otherwise use the last detach time to determine unused period
+			var unusedDuration time.Duration
+			if !hasAttachmentHistory {
+				// For volumes that have never been attached, use creation time
+				unusedDuration = time.Since(*volume.CreateTime)
+			} else if lastDetachTime != nil {
+				unusedDuration = time.Since(*lastDetachTime)
+			} else {
+				// If we have attachment history but no detach time, something's wrong
+				// Be conservative and skip this volume
+				continue
+			}
+
+			unusedDays := int(unusedDuration.Hours() / 24)
+			if unusedDays < opts.DaysUnused {
+				continue
+			}
+
+			// Get volume metrics with error handling
+			volumeID := aws.StringValue(volume.VolumeId)
+			endTime := time.Now().UTC().Truncate(time.Minute)
+			daysUnused := awslib.Max(1, opts.DaysUnused)
+			metricStartTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
+			metrics, err := s.getVolumeMetrics(clients.CloudWatch, volumeID, metricStartTime, endTime)
+			if err != nil {
+				logging.Error("Failed to get volume metrics", err, map[string]interface{}{
+					"volume_id": volumeID,
+					"startTime": metricStartTime.Format(time.RFC3339),
+					"endTime":   endTime.Format(time.RFC3339),
+				})
+				// Continue processing even if metrics collection fails
+			}
+
+			// Check if volume is truly unused based on all criteria
+			isUnused := true
+			var unusedReasons []string
+
+			// Add attachment status to reasons
+			unusedReasons = append(unusedReasons, fmt.Sprintf("Volume is unattached and %d days old.", ageInDays))
+
+			// Check metrics for activity with thresholds
+			const minActivityThreshold = 1.0 // Minimum ops/day to consider active
+			if metrics != nil {
+				if readOps, ok := metrics["ReadOps"]; ok {
+					avgReadOpsPerDay := readOps / float64(daysUnused)
+					if avgReadOpsPerDay >= minActivityThreshold {
+						isUnused = false
+					} else {
+						unusedReasons = append(unusedReasons, fmt.Sprintf("Very low read activity (%.2f ops/day) in the last %d days.",
+							avgReadOpsPerDay, daysUnused))
+					}
+				}
+				if writeOps, ok := metrics["WriteOps"]; ok {
+					avgWriteOpsPerDay := writeOps / float64(daysUnused)
+					if avgWriteOpsPerDay >= minActivityThreshold {
+						isUnused = false
+					} else {
+						unusedReasons = append(unusedReasons, fmt.Sprintf("Very low write activity (%.2f ops/day) in the last %d days.",
+							avgWriteOpsPerDay, daysUnused))
+					}
+				}
+				if idleTime, ok := metrics["IdleTime"]; ok {
+					if idleTime < 95.0 { // Less than 95% idle means active
+						isUnused = false
+					} else {
+						unusedReasons = append(unusedReasons, fmt.Sprintf("Volume has been idle %.1f%% of the time in the last %d days.",
+							idleTime, daysUnused))
+					}
+				}
+			}
+
+			// Skip if volume is not unused
+			if !isUnused {
 				continue
 			}
 
@@ -112,9 +236,10 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				resourceName = name
 			}
 
-			// Calculate costs with error handling and metrics
-			costEstimator := awslib.DefaultCostEstimator
+			// Calculate costs only for unused volumes
 			var costs *awslib.CostBreakdown
+			var costDetails map[string]interface{}
+			costEstimator := awslib.DefaultCostEstimator
 			if costEstimator != nil {
 				costCalculations++
 				volumeSize := aws.Int64Value(volume.Size)
@@ -144,95 +269,127 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 					costs.Lifetime = &lifetime
 					hours := float64(int(hoursRunning*100+0.5)) / 100
 					costs.HoursRunning = &hours
+					costDetails = map[string]interface{}{
+						"total": costs,
+					}
 				}
 			}
 
 			// Collect all relevant details
-			details := map[string]interface{}{
-				"volume_id":            aws.StringValue(volume.VolumeId),
-				"size":                 aws.Int64Value(volume.Size),
-				"state":                aws.StringValue(volume.State),
-				"volume_type":          aws.StringValue(volume.VolumeType),
-				"iops":                 aws.Int64Value(volume.Iops),
-				"throughput":           aws.Int64Value(volume.Throughput),
-				"encrypted":            aws.BoolValue(volume.Encrypted),
-				"kms_key_id":           aws.StringValue(volume.KmsKeyId),
-				"outpost_arn":          aws.StringValue(volume.OutpostArn),
-				"create_time":          volume.CreateTime.Format(time.RFC3339),
-				"hours_running":        time.Since(*volume.CreateTime).Hours(),
-				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
-				"fast_restored":        aws.BoolValue(volume.FastRestored),
-				"snapshot_id":          aws.StringValue(volume.SnapshotId),
-				"availability_zone":    aws.StringValue(volume.AvailabilityZone),
-				"account_id":           accountID,
-				"region":               opts.Region,
-				"tags":                 tags,
+			attachmentHistory := map[string]interface{}{
+				"currently_attached": isCurrentlyAttached,
+				"has_history":       hasAttachmentHistory,
 			}
+			if lastAttachTime != nil {
+				attachmentHistory["last_attach_time"] = lastAttachTime.Format(time.RFC3339)
+			}
+			if lastDetachTime != nil {
+				attachmentHistory["last_detach_time"] = lastDetachTime.Format(time.RFC3339)
+			}
+			attachmentHistory["days_unused"] = unusedDays
 
-			// Add attachments
+			// Get current attachments info if any
 			var attachments []map[string]interface{}
-			for _, attachment := range volume.Attachments {
-				attachmentDetails := map[string]interface{}{
-					"attach_time":           aws.TimeValue(attachment.AttachTime).Format(time.RFC3339),
-					"device":                aws.StringValue(attachment.Device),
-					"instance_id":           aws.StringValue(attachment.InstanceId),
-					"state":                 aws.StringValue(attachment.State),
-					"volume_id":             aws.StringValue(attachment.VolumeId),
-					"delete_on_termination": aws.BoolValue(attachment.DeleteOnTermination),
+			for _, att := range volume.Attachments {
+				attachment := map[string]interface{}{
+					"instance_id":  aws.StringValue(att.InstanceId),
+					"device":       aws.StringValue(att.Device),
+					"state":        aws.StringValue(att.State),
+					"attach_time":  att.AttachTime.Format(time.RFC3339),
+					"delete_on_termination": aws.BoolValue(att.DeleteOnTermination),
 				}
-				attachments = append(attachments, attachmentDetails)
+				attachments = append(attachments, attachment)
 			}
 			if len(attachments) > 0 {
-				details["attachments"] = attachments
+				attachmentHistory["current_attachments"] = attachments
 			}
 
-			// Build cost details
-			var costDetails map[string]interface{}
-			if costs != nil {
-				costDetails = map[string]interface{}{
-					"total": costs,
+			details := map[string]interface{}{
+				// Resource identifiers
+				"account_id":    accountID,
+				"region":        opts.Region,
+				"volume_id":     aws.StringValue(volume.VolumeId),
+				"snapshot_id":   aws.StringValue(volume.SnapshotId),
+				"tags":         tags,
+
+				// Volume configuration
+				"volume_type":          aws.StringValue(volume.VolumeType),
+				"size_gb":             aws.Int64Value(volume.Size),
+				"iops":                aws.Int64Value(volume.Iops),
+				"throughput":          aws.Int64Value(volume.Throughput),
+				"encrypted":           aws.BoolValue(volume.Encrypted),
+				"kms_key_id":          aws.StringValue(volume.KmsKeyId),
+				"multi_attach_enabled": aws.BoolValue(volume.MultiAttachEnabled),
+
+				// Location info
+				"availability_zone": aws.StringValue(volume.AvailabilityZone),
+				"outpost_arn":      aws.StringValue(volume.OutpostArn),
+
+				// Status and timing
+				"state":              aws.StringValue(volume.State),
+				"created":            volume.CreateTime.Format(time.RFC3339),
+				"age_days":           ageInDays,
+				"attachment_history": attachmentHistory,
+				"fast_restored":     aws.BoolValue(volume.FastRestored),
+			}
+
+			// Add status details if available
+			if len(statusResp.VolumeStatuses) > 0 {
+				status := statusResp.VolumeStatuses[0]
+				volumeStatus := map[string]interface{}{
+					"status":                aws.StringValue(status.VolumeStatus.Status),
+					"details":               status.VolumeStatus.Details,
+					"availability_zone":     aws.StringValue(status.AvailabilityZone),
 				}
+
+				if status.Events != nil {
+					var events []map[string]interface{}
+					for _, event := range status.Events {
+						eventMap := map[string]interface{}{
+							"event_type":    aws.StringValue(event.EventType),
+							"description":   aws.StringValue(event.Description),
+							"event_id":      aws.StringValue(event.EventId),
+						}
+						if event.NotBefore != nil {
+							eventMap["not_before"] = event.NotBefore.Format(time.RFC3339)
+						}
+						if event.NotAfter != nil {
+							eventMap["not_after"] = event.NotAfter.Format(time.RFC3339)
+						}
+						events = append(events, eventMap)
+					}
+					volumeStatus["events"] = events
+				}
+
+				if status.Actions != nil {
+					var actions []map[string]interface{}
+					for _, action := range status.Actions {
+						actionMap := map[string]interface{}{
+							"code":        aws.StringValue(action.Code),
+							"description": aws.StringValue(action.Description),
+							"event_type":  aws.StringValue(action.EventType),
+							"event_id":    aws.StringValue(action.EventId),
+						}
+						actions = append(actions, actionMap)
+					}
+					volumeStatus["actions"] = actions
+				}
+
+				details["volume_status"] = volumeStatus
 			}
 
-			// Get volume metrics with error handling
-			volumeID := aws.StringValue(volume.VolumeId)
-			endTime := time.Now().UTC().Truncate(time.Minute)
-			daysUnused := awslib.Max(1, opts.DaysUnused)
-			metricStartTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
-			metrics, err := s.getVolumeMetrics(clients.CloudWatch, volumeID, metricStartTime, endTime)
-			if err != nil {
-				logging.Error("Failed to get volume metrics", err, map[string]interface{}{
-					"volume_id": volumeID,
-					"startTime": metricStartTime.Format(time.RFC3339),
-					"endTime":   endTime.Format(time.RFC3339),
-				})
-				// Continue processing even if metrics collection fails
+			if metrics != nil {
+				details["metrics"] = metrics
 			}
 
 			// Build reasons
-			var reasons []string
-			if aws.StringValue(volume.State) == "available" {
-				reasons = append(reasons, fmt.Sprintf("Volume is not attached to any instance for %d days.", daysUnused))
-			}
-
-			// Add metrics-based reasons if available
-			if metrics != nil {
-				if readOps, ok := metrics["ReadOps"]; ok && readOps == 0 {
-					reasons = append(reasons, fmt.Sprintf("No read operations in the last %d days.", daysUnused))
-				}
-				if writeOps, ok := metrics["WriteOps"]; ok && writeOps == 0 {
-					reasons = append(reasons, fmt.Sprintf("No write operations in the last %d days.", daysUnused))
-				}
-			}
-
-			// Create scan result
 			result := awslib.ScanResult{
 				ResourceType: s.Label(),
 				ResourceID:   aws.StringValue(volume.VolumeId),
 				ResourceName: resourceName,
 				Details:      details,
 				Cost:         costDetails,
-				Reason:       strings.Join(reasons, "\n"),
+				Reason:       strings.Join(unusedReasons, "\n"),
 			}
 
 			results = append(results, result)

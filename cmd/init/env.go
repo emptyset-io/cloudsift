@@ -57,6 +57,11 @@ CLOUDSIFT_SCAN_REGIONS=
 # Example: ec2-instances,ebs-volumes
 CLOUDSIFT_SCAN_SCANNERS=
 
+# Comma-separated list of AWS account IDs to scan
+# Leave empty to scan all accounts in the organization
+# Example: 123456789012,098765432109
+CLOUDSIFT_SCAN_ACCOUNTS=
+
 # Output type (filesystem or s3)
 # Default: filesystem
 CLOUDSIFT_SCAN_OUTPUT=filesystem
