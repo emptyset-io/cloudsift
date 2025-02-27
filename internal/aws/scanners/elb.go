@@ -7,7 +7,6 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -323,13 +322,6 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create service clients
 	elbv2Client := elbv2.New(sess)
 	elbClassicClient := elb.New(sess)
@@ -418,7 +410,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			ResourceID:   lbARN,
 			Reason:       reason,
 			Details: map[string]interface{}{
-				"account_id":        accountID,
+				"account_id":        opts.AccountID,
 				"region":            opts.Region,
 				"type":              lbType,
 				"scheme":            aws.StringValue(lb.Scheme),
@@ -506,7 +498,7 @@ func (s *ELBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 			ResourceID:   lbName,
 			Reason:       reason,
 			Details: map[string]interface{}{
-				"account_id":        accountID,
+				"account_id":        opts.AccountID,
 				"region":            opts.Region,
 				"type":              "classic",
 				"scheme":            aws.StringValue(lb.Scheme),

@@ -47,13 +47,6 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create service clients
 	clients := utils.CreateServiceClients(sess)
 	rdsClient := rds.New(sess)
@@ -100,7 +93,7 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				"EngineVersion":      aws.StringValue(instance.EngineVersion),
 				"CreationTime":       aws.TimeValue(instance.InstanceCreateTime),
 				"HoursRunning":       hoursRunning,
-				"AccountId":          accountID,
+				"opts.AccountID":     opts.AccountID,
 				"Region":             opts.Region,
 				"Status":             aws.StringValue(instance.DBInstanceStatus),
 				"StorageType":        aws.StringValue(instance.StorageType),

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/worker"
@@ -262,18 +261,17 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create IAM client
 	iamClient := iam.New(sess)
 
-	// Create rate limiter specific to this account/region with lower rate for IAM
-	rateLimiterKey := fmt.Sprintf("%s-%s-iam", accountID, opts.Region)
+	// Log scan start
+	logging.Info("Starting IAM role scan", map[string]interface{}{
+		"account_id": opts.AccountID,
+		"region":     opts.Region,
+	})
+
+	// Create rate limiter for IAM API
+	rateLimiterKey := fmt.Sprintf("%s-%s-iam", opts.AccountID, opts.Region)
 	iamConfig := &config.RateLimitConfig{
 		RequestsPerSecond: 35.0,              // IAM has lower rate limits
 		MaxRetries:        10,                // Keep retrying on throttling
@@ -299,10 +297,10 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 		atomic.AddInt32(&activeWorkers, 1)
 		defer atomic.AddInt32(&activeWorkers, -1)
 
-		rt := &roleTask{
+		task := &roleTask{
 			role:        role,
 			iamClient:   iamClient,
-			accountID:   accountID,
+			accountID:   opts.AccountID,
 			region:      opts.Region,
 			scanner:     s,
 			opts:        opts,
@@ -310,13 +308,13 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 			rateLimiter: rateLimiter,
 		}
 
-		result, err := rt.processRole(ctx)
+		result, err := task.processRole(ctx)
 		if err != nil {
 			if strings.Contains(err.Error(), "Throttling:") {
 				// Log throttling events at debug level since they're expected and handled
 				logging.Debug("Rate limited by AWS, backing off", map[string]interface{}{
 					"role_name": aws.StringValue(role.RoleName),
-					"account":   accountID,
+					"account":   opts.AccountID,
 					"region":    opts.Region,
 					"error":     err.Error(),
 				})
@@ -329,7 +327,7 @@ func (s *IAMRoleScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 				// If error channel is full, log the error
 				logging.Error("Failed to process role", err, map[string]interface{}{
 					"role_name": aws.StringValue(role.RoleName),
-					"account":   accountID,
+					"account":   opts.AccountID,
 					"region":    opts.Region,
 				})
 			}

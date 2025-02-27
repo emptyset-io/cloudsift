@@ -138,13 +138,6 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create service clients
 	dynamodbClient := dynamodb.New(sess)
 	cwClient := cloudwatch.New(sess)
@@ -205,7 +198,7 @@ func (s *DynamoDBScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, err
 				"ReadThroughput":  metrics["read_throughput"],
 				"WriteThroughput": metrics["write_throughput"],
 				"ThrottledEvents": metrics["throttled_events"],
-				"account_id":      accountID,
+				"account_id":      opts.AccountID,
 				"region":          opts.Region,
 			}
 

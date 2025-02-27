@@ -5,7 +5,6 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
-	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -45,19 +44,12 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create EC2 service client
 	svc := ec2.New(sess)
 
 	// Log the start of the scan with account details
 	logging.Debug("Starting EBS snapshot scan", map[string]interface{}{
-		"account_id": accountID,
+		"account_id": opts.AccountID,
 		"region":     opts.Region,
 	})
 
@@ -82,7 +74,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 		snapshotsToProcess := make([]*ec2.Snapshot, 0)
 
 		logging.Debug("Processing snapshot page", map[string]interface{}{
-			"account_id":   accountID,
+			"account_id":   opts.AccountID,
 			"region":       opts.Region,
 			"page_size":    len(page.Snapshots),
 			"is_last_page": lastPage,
@@ -127,7 +119,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					// Don't treat this as an error - the volume might have been deleted
 					// Just log it as debug information
 					logging.Debug("Some volumes not found during batch lookup", map[string]interface{}{
-						"account_id": accountID,
+						"account_id": opts.AccountID,
 						"region":     opts.Region,
 						"batch_size": len(batch),
 						"error":      err.Error(),
@@ -171,26 +163,26 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			ageString := awslib.FormatTimeDifference(time.Now(), snapshot.StartTime)
 
 			details := map[string]interface{}{
-				"snapshot_id":            aws.StringValue(snapshot.SnapshotId),
-				"description":            aws.StringValue(snapshot.Description),
-				"volume_id":              aws.StringValue(snapshot.VolumeId),
-				"volume_size":            aws.Int64Value(snapshot.VolumeSize),
-				"start_time":             snapshot.StartTime.Format(time.RFC3339),
-				"encrypted":              aws.BoolValue(snapshot.Encrypted),
-				"owner_id":               aws.StringValue(snapshot.OwnerId),
-				"progress":               aws.StringValue(snapshot.Progress),
-				"state":                  aws.StringValue(snapshot.State),
-				"state_message":          aws.StringValue(snapshot.StateMessage),
-				"tags":                   tags,
-				"volume_type":            volumeType,
-				"account_id":             accountID,
-				"region":                 opts.Region,
-				"hours_running":          time.Since(*snapshot.StartTime).Hours(),
+				"snapshot_id":   aws.StringValue(snapshot.SnapshotId),
+				"description":   aws.StringValue(snapshot.Description),
+				"volume_id":     aws.StringValue(snapshot.VolumeId),
+				"volume_size":   aws.Int64Value(snapshot.VolumeSize),
+				"start_time":    snapshot.StartTime.Format(time.RFC3339),
+				"encrypted":     aws.BoolValue(snapshot.Encrypted),
+				"owner_id":      aws.StringValue(snapshot.OwnerId),
+				"progress":      aws.StringValue(snapshot.Progress),
+				"state":         aws.StringValue(snapshot.State),
+				"state_message": aws.StringValue(snapshot.StateMessage),
+				"tags":          tags,
+				"volume_type":   volumeType,
+				"account_id":    opts.AccountID,
+				"region":        opts.Region,
+				"hours_running": time.Since(*snapshot.StartTime).Hours(),
 			}
 
 			// Log that we found a result
 			logging.Debug("Found unused EBS snapshot", map[string]interface{}{
-				"account_id":    accountID,
+				"account_id":    opts.AccountID,
 				"region":        opts.Region,
 				"resource_name": resourceName,
 				"resource_id":   aws.StringValue(snapshot.SnapshotId),
@@ -238,7 +230,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 	// Log performance metrics
 	logging.Debug("EBS snapshot scan completed", map[string]interface{}{
-		"account_id":          accountID,
+		"account_id":          opts.AccountID,
 		"region":              opts.Region,
 		"duration_ms":         time.Since(scanStart).Milliseconds(),
 		"snapshots_processed": snapshotsProcessed,
