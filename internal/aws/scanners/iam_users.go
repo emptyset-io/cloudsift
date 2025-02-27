@@ -99,16 +99,22 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 	if lastLoginTime == nil {
 		reasons = append(reasons, "User has never logged in to the console.")
 	} else {
-		loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
-		reasons = append(reasons, fmt.Sprintf("User has not logged in to the console in %s.", loginAge))
+		age := time.Since(*lastLoginTime)
+		if age.Hours()/24 > float64(opts.DaysUnused) {
+			loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
+			reasons = append(reasons, fmt.Sprintf("User has not logged in to the console in %s.", loginAge))
+		}
 	}
 
 	// Check access key usage
 	if keyLastUsedTime == nil {
 		reasons = append(reasons, "User has never used access keys.")
 	} else {
-		keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
-		reasons = append(reasons, fmt.Sprintf("User has not used access keys in %s.", keyAge))
+		age := time.Since(*keyLastUsedTime)
+		if age.Hours()/24 > float64(opts.DaysUnused) {
+			keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
+			reasons = append(reasons, fmt.Sprintf("User has not used access keys in %s.", keyAge))
+		}
 	}
 
 	return reasons
@@ -149,6 +155,12 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 
 	var results awslib.ScanResults
 	for _, user := range users {
+		// Skip users that are newer than DaysUnused
+		age := time.Since(aws.TimeValue(user.CreateDate))
+		if age.Hours()/24 <= float64(opts.DaysUnused) {
+			continue
+		}
+
 		userName := aws.StringValue(user.UserName)
 		userARN := aws.StringValue(user.Arn)
 
@@ -172,6 +184,20 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 				"user_name": userName,
 			})
 			continue
+		}
+
+		// Skip if either login or key usage is within DaysUnused
+		if lastLoginTime != nil {
+			loginAge := time.Since(*lastLoginTime)
+			if loginAge.Hours()/24 <= float64(opts.DaysUnused) {
+				continue
+			}
+		}
+		if keyLastUsedTime != nil {
+			keyAge := time.Since(*keyLastUsedTime)
+			if keyAge.Hours()/24 <= float64(opts.DaysUnused) {
+				continue
+			}
 		}
 
 		// Determine unused reasons

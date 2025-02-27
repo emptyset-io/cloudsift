@@ -54,8 +54,8 @@ type Resource struct {
 	ResourceType string
 	Name         string
 	ResourceID   string
-	Reason       string
-	DetailsJSON  template.JS // JSON-formatted details for display
+	Reason       template.HTML
+	DetailsJSON  template.JS
 }
 
 // WriteHTML writes scan results to an HTML file
@@ -277,7 +277,7 @@ func processResults(results []aws.ScanResult) TemplateData {
 			ResourceType: result.ResourceType,
 			Name:         resourceName,
 			ResourceID:   resourceID,
-			Reason:       result.Reason,
+			Reason:       template.HTML(strings.ReplaceAll(result.Reason, ".", ".<br>")),
 			DetailsJSON:  template.JS(detailsJSON),
 		})
 	}
