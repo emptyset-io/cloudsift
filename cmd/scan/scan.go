@@ -263,7 +263,7 @@ Examples:
 	cmd.Flags().StringVar(&opts.ignoreResourceIDs, "ignore-resource-ids", "", "Comma-separated list of resource IDs to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreResourceNames, "ignore-resource-names", "", "Comma-separated list of resource names to ignore (case-insensitive)")
 	cmd.Flags().StringVar(&opts.ignoreTags, "ignore-tags", "", "Comma-separated list of tags to ignore in KEY=VALUE format (case-insensitive)")
-	cmd.Flags().StringVar(&opts.accounts, "accounts", "", "Comma-separated list of account IDs to scan")
+	cmd.Flags().StringVar(&opts.accounts, "accounts", "", "Comma-separated list of account IDs to scan (default: all accounts in organization)")
 
 	return cmd
 }
