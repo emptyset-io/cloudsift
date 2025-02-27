@@ -97,18 +97,18 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 
 	// Check if user has ever logged in
 	if lastLoginTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has never logged in"))
+		reasons = append(reasons, "User has never logged in to the console.")
 	} else {
 		loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
-		reasons = append(reasons, fmt.Sprintf("User %s", loginAge))
+		reasons = append(reasons, fmt.Sprintf("User has not logged in to the console in %s.", loginAge))
 	}
 
 	// Check access key usage
 	if keyLastUsedTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has no access keys"))
+		reasons = append(reasons, "User has never used access keys.")
 	} else {
 		keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
-		reasons = append(reasons, fmt.Sprintf("Access keys %s", keyAge))
+		reasons = append(reasons, fmt.Sprintf("User has not used access keys in %s.", keyAge))
 	}
 
 	return reasons
