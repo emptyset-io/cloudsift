@@ -145,9 +145,6 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 		// Process filtered snapshots
 		for _, snapshot := range snapshotsToProcess {
-			// Calculate age of snapshot (needed for both filtering and reasons)
-			age := time.Since(*snapshot.StartTime)
-
 			// Convert AWS tags to map
 			tags := make(map[string]string)
 			for _, tag := range snapshot.Tags {
@@ -159,9 +156,6 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			if resourceName == "" {
 				resourceName = aws.StringValue(snapshot.SnapshotId)
 			}
-			if name, ok := tags["Name"]; ok {
-				resourceName = name
-			}
 
 			// Get volume type from cache or use default
 			volumeType := "gp2" // Default to gp2 if we can't determine the volume type
@@ -171,78 +165,27 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 				}
 			}
 
-			// Calculate costs
-			costEstimator := awslib.DefaultCostEstimator
-			var costs *awslib.CostBreakdown
-			if costEstimator != nil {
-				costStart := time.Now()
-				snapshotSize := aws.Int64Value(snapshot.VolumeSize)
-				hoursRunning := time.Since(*snapshot.StartTime).Hours()
+			// Calculate age of snapshot
+			age := time.Since(*snapshot.StartTime)
+			ageInDays := int(age.Hours() / 24)
+			ageString := awslib.FormatTimeDifference(time.Now(), snapshot.StartTime)
 
-				costs, err = costEstimator.CalculateCost(awslib.ResourceCostConfig{
-					ResourceType: "EBSSnapshots",
-					ResourceSize: snapshotSize,
-					Region:       opts.Region,
-					CreationTime: *snapshot.StartTime,
-					VolumeType:   volumeType,
-				})
-				costCalculations++
-				if err != nil {
-					logging.Error("Failed to calculate costs", err, map[string]interface{}{
-						"account_id":    accountID,
-						"region":        opts.Region,
-						"resource_name": resourceName,
-						"resource_id":   aws.StringValue(snapshot.SnapshotId),
-						"duration_ms":   time.Since(costStart).Milliseconds(),
-					})
-				} else {
-					logging.Debug("Cost calculation completed", map[string]interface{}{
-						"resource_id": aws.StringValue(snapshot.SnapshotId),
-						"duration_ms": time.Since(costStart).Milliseconds(),
-					})
-				}
-
-				// Calculate lifetime cost
-				if costs != nil {
-					lifetime := roundCost(costs.HourlyRate * hoursRunning)
-					costs.Lifetime = &lifetime
-				}
-			}
-
-			// Collect all relevant details
 			details := map[string]interface{}{
 				"snapshot_id":            aws.StringValue(snapshot.SnapshotId),
+				"description":            aws.StringValue(snapshot.Description),
 				"volume_id":              aws.StringValue(snapshot.VolumeId),
+				"volume_size":            aws.Int64Value(snapshot.VolumeSize),
+				"start_time":             snapshot.StartTime.Format(time.RFC3339),
+				"encrypted":              aws.BoolValue(snapshot.Encrypted),
+				"owner_id":               aws.StringValue(snapshot.OwnerId),
+				"progress":               aws.StringValue(snapshot.Progress),
 				"state":                  aws.StringValue(snapshot.State),
 				"state_message":          aws.StringValue(snapshot.StateMessage),
-				"start_time":             snapshot.StartTime.Format(time.RFC3339),
-				"progress":               aws.StringValue(snapshot.Progress),
-				"owner_id":               aws.StringValue(snapshot.OwnerId),
-				"description":            aws.StringValue(snapshot.Description),
-				"volume_size":            aws.Int64Value(snapshot.VolumeSize),
-				"owner_alias":            aws.StringValue(snapshot.OwnerAlias),
-				"encrypted":              aws.BoolValue(snapshot.Encrypted),
-				"kms_key_id":             aws.StringValue(snapshot.KmsKeyId),
-				"data_encryption_key_id": aws.StringValue(snapshot.DataEncryptionKeyId),
-				"hours_running":          time.Since(*snapshot.StartTime).Hours(),
+				"tags":                   tags,
 				"volume_type":            volumeType,
 				"account_id":             accountID,
 				"region":                 opts.Region,
-			}
-
-			// Add storage tier info if available
-			if snapshot.StorageTier != nil {
-				details["storage_tier"] = map[string]interface{}{
-					"tier": aws.StringValue(snapshot.StorageTier),
-				}
-			}
-
-			// Build cost details
-			var costDetails map[string]interface{}
-			if costs != nil {
-				costDetails = map[string]interface{}{
-					"total": costs,
-				}
+				"hours_running":          time.Since(*snapshot.StartTime).Hours(),
 			}
 
 			// Log that we found a result
@@ -255,23 +198,20 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 
 			reasons := []string{}
 			// Check for old snapshots
-			if age.Hours()/24 > float64(opts.DaysUnused) {
-				reasons = append(reasons, fmt.Sprintf("Snapshot is older than %d days (age: %.0f days).",
-					opts.DaysUnused, age.Hours()/24))
+			if ageInDays > opts.DaysUnused {
+				reasons = append(reasons, fmt.Sprintf("Snapshot is %s old.", ageString))
 			}
 
 			// Check for snapshots of deleted volumes
-			if aws.StringValue(snapshot.VolumeId) == "" {
-				reasons = append(reasons, fmt.Sprintf("Source volume was deleted. Snapshot has not been used in %d days.",
-					opts.DaysUnused))
+			if _, ok := volumeTypesCache[aws.StringValue(snapshot.VolumeId)]; !ok {
+				reasons = append(reasons, fmt.Sprintf("Source volume was deleted. Snapshot has not been used in %d days.", opts.DaysUnused))
 			}
 
 			// Check for multiple snapshots of the same volume
 			if aws.StringValue(snapshot.VolumeId) != "" {
 				volumeSnapshots[aws.StringValue(snapshot.VolumeId)] = append(volumeSnapshots[aws.StringValue(snapshot.VolumeId)], aws.StringValue(snapshot.SnapshotId))
 				if len(volumeSnapshots[aws.StringValue(snapshot.VolumeId)]) > 1 {
-					reasons = append(reasons, fmt.Sprintf("Multiple snapshots exist for volume %s. This snapshot has not been used in %d days.",
-						aws.StringValue(snapshot.VolumeId), opts.DaysUnused))
+					reasons = append(reasons, fmt.Sprintf("Multiple snapshots exist for volume %s. This snapshot has not been used in %d days.", aws.StringValue(snapshot.VolumeId), opts.DaysUnused))
 				}
 			}
 
@@ -283,7 +223,6 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					Reason:       reasons[0],
 					Tags:         tags,
 					Details:      details,
-					Cost:         costDetails,
 				})
 			}
 		}

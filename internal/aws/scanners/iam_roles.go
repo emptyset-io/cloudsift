@@ -85,7 +85,11 @@ func (t *roleTask) processRole(ctx context.Context) (*awslib.ScanResult, error) 
 	t.rateLimiter.OnSuccess()
 
 	// Calculate age string
-	ageString := t.scanner.calculateAgeString(t.now, lastUsedTime)
+	lastUsed := aws.TimeValue(lastUsedTime)
+	if lastUsed.IsZero() {
+		lastUsed = aws.TimeValue(t.role.CreateDate)
+	}
+	ageString := awslib.FormatTimeDifference(t.now, &lastUsed)
 
 	// Determine unused reasons
 	reasons := t.scanner.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, t.opts.DaysUnused, t.opts)
@@ -222,25 +226,6 @@ func (t *roleTask) getRolePolicies(ctx context.Context) ([]*iam.AttachedPolicy, 
 	t.rateLimiter.OnSuccess()
 
 	return attachedPolicies, inlinePolicies, instanceProfiles, nil
-}
-
-// calculateAgeString formats the time difference between now and a given time
-func (s *IAMRoleScanner) calculateAgeString(now time.Time, t *time.Time) string {
-	if t == nil {
-		return "Never used"
-	}
-
-	duration := now.Sub(*t)
-	days := int(duration.Hours() / 24)
-
-	if days < 30 {
-		return fmt.Sprintf("%d days ago", days)
-	} else if days < 365 {
-		months := days / 30
-		return fmt.Sprintf("%d months ago", months)
-	}
-	years := days / 365
-	return fmt.Sprintf("%d years ago", years)
 }
 
 // determineUnusedReasons determines why a role is considered unused

@@ -8,7 +8,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>{{ .Styles }}</style>
-    <script>{{ .Scripts }}</script>
 </head>
 <body>
     <header>
@@ -315,13 +314,13 @@
                     <tbody>
                         {{ range .Resources }}
                         <tr>
-                            <td>{{ .AccountID }}</td>
-                            <td>{{ .AccountName }}</td>
-                            <td>{{ .ResourceType }}</td>
-                            <td>{{ .Name }}</td>
-                            <td>{{ .ResourceID }}</td>
-                            <td>{{ .Region }}</td>
-                            <td>{{ .Reason }}</td>
+                            <td title="{{ .AccountID }}">{{ .AccountID }}</td>
+                            <td title="{{ .AccountName }}">{{ .AccountName }}</td>
+                            <td title="{{ .ResourceType }}">{{ .ResourceType }}</td>
+                            <td title="{{ .Name }}">{{ .Name }}</td>
+                            <td title="{{ .ResourceID }}">{{ .ResourceID }}</td>
+                            <td title="{{ .Region }}">{{ .Region }}</td>
+                            <td title="{{ .Reason }}">{{ .Reason }}</td>
                             <td>
                                 <button class="btn" onclick="showDetailsModal({{ .DetailsJSON }})">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -347,5 +346,6 @@
             <div id="modal-content"></div>
         </div>
     </div>
+    <script>{{ .Scripts }}</script>
 </body>
 </html>

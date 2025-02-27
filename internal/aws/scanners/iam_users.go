@@ -1,13 +1,18 @@
 package scanners
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	awslib "cloudsift/internal/aws"
 	"cloudsift/internal/aws/utils"
+	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
+	"cloudsift/internal/worker"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -16,6 +21,18 @@ import (
 
 // IAMUserScanner scans for unused IAM users
 type IAMUserScanner struct{}
+
+// userTask represents the task of processing a single IAM user
+type userTask struct {
+	user        *iam.User
+	iamClient   *iam.IAM
+	accountID   string
+	region      string
+	scanner     *IAMUserScanner
+	opts        awslib.ScanOptions
+	now         time.Time
+	rateLimiter *awslib.RateLimiter
+}
 
 func init() {
 	awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{})
@@ -34,6 +51,94 @@ func (s *IAMUserScanner) ArgumentName() string {
 // Label implements Scanner interface
 func (s *IAMUserScanner) Label() string {
 	return "IAM Users"
+}
+
+// processUser processes a single IAM user and returns a scan result if the user is unused
+func (t *userTask) processUser(ctx context.Context) (*awslib.ScanResult, error) {
+	userName := aws.StringValue(t.user.UserName)
+	userARN := aws.StringValue(t.user.Arn)
+
+	logging.Debug("Analyzing IAM user", map[string]interface{}{
+		"user_name": userName,
+		"user_arn":  userARN,
+	})
+
+	// Get last console login time with rate limiting
+	if err := t.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait error: %w", err)
+	}
+	lastLoginTime, err := t.scanner.getLastConsoleLogin(t.iamClient, userName)
+	if err != nil {
+		if strings.Contains(err.Error(), "Throttling:") {
+			logging.Info("TEMP: IAM API throttled", map[string]interface{}{
+				"user_name": userName,
+				"error":     err.Error(),
+			})
+		}
+		logging.Error("Failed to get last console login", err, map[string]interface{}{
+			"user_name": userName,
+		})
+		t.rateLimiter.OnFailure()
+		return nil, err
+	}
+	t.rateLimiter.OnSuccess()
+
+	// Get last key usage time with rate limiting
+	if err := t.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait error: %w", err)
+	}
+	keyLastUsedTime, err := t.scanner.getLastKeyUsage(t.iamClient, userName)
+	if err != nil {
+		logging.Error("Failed to get key usage time", err, map[string]interface{}{
+			"user_name": userName,
+		})
+		t.rateLimiter.OnFailure()
+		return nil, err
+	}
+	t.rateLimiter.OnSuccess()
+
+	// Calculate age strings
+	var lastUsedTime *time.Time
+	if lastLoginTime != nil && keyLastUsedTime != nil {
+		if lastLoginTime.After(*keyLastUsedTime) {
+			lastUsedTime = lastLoginTime
+		} else {
+			lastUsedTime = keyLastUsedTime
+		}
+	} else if lastLoginTime != nil {
+		lastUsedTime = lastLoginTime
+	} else if keyLastUsedTime != nil {
+		lastUsedTime = keyLastUsedTime
+	}
+
+	if lastUsedTime == nil {
+		lastUsedTime = t.user.CreateDate
+	}
+
+	ageString := awslib.FormatTimeDifference(t.now, lastUsedTime)
+
+	// Determine unused reasons
+	reasons := t.scanner.determineUnusedReasons(lastLoginTime, keyLastUsedTime, t.opts)
+	if len(reasons) > 0 {
+		details := map[string]interface{}{
+			"LastUsed":         ageString,
+			"LastConsoleLogin": formatTimeOrNever(lastLoginTime),
+			"LastKeyUsed":      formatTimeOrNever(keyLastUsedTime),
+			"HasLoginProfile":  lastLoginTime != nil,
+			"HasAccessKeys":    keyLastUsedTime != nil,
+			"CreatedAt":        aws.TimeValue(t.user.CreateDate).Format(time.RFC3339),
+		}
+
+		return &awslib.ScanResult{
+			ResourceType: t.scanner.Label(),
+			ResourceName: userName,
+			ResourceID:   userARN,
+			Reason:       strings.Join(reasons, "\n"),
+			Details:      details,
+		}, nil
+	}
+
+	return nil, nil
 }
 
 // getLastConsoleLogin gets the last console login time for a user
@@ -93,26 +198,27 @@ func (s *IAMUserScanner) getLastKeyUsage(iamClient *iam.IAM, userName string) (*
 // determineUnusedReasons determines why a user is considered unused
 func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *time.Time, opts awslib.ScanOptions) []string {
 	var reasons []string
+	now := time.Now()
 
-	// Check for users who have never logged in
+	// Check if user has ever logged in
 	if lastLoginTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has never logged in to the console in the last %d days.", opts.DaysUnused))
+		reasons = append(reasons, "User has never logged in to the console")
 	} else {
 		age := time.Since(*lastLoginTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("User has not logged in for %d days (last login: %s).",
-				opts.DaysUnused, lastLoginTime.Format("2006-01-02")))
+			loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
+			reasons = append(reasons, fmt.Sprintf("User has not logged in to the console in %s", loginAge))
 		}
 	}
 
-	// Check for access keys
+	// Check access key usage
 	if keyLastUsedTime == nil {
-		reasons = append(reasons, fmt.Sprintf("User has no access keys for %d days.", opts.DaysUnused))
+		reasons = append(reasons, "User has never used access keys")
 	} else {
 		age := time.Since(*keyLastUsedTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			reasons = append(reasons, fmt.Sprintf("Access key has not been used in %d days (last used: %s).",
-				opts.DaysUnused, keyLastUsedTime.Format("2006-01-02")))
+			keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
+			reasons = append(reasons, fmt.Sprintf("User has not used access keys in %s", keyAge))
 		}
 	}
 
@@ -140,74 +246,134 @@ func (s *IAMUserScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, erro
 	// Create IAM client
 	iamClient := iam.New(sess)
 
-	// Get all IAM users
-	var users []*iam.User
+	// Create rate limiter specific to this account/region with lower rate for IAM
+	rateLimiterKey := fmt.Sprintf("%s-%s-iam", accountID, opts.Region)
+	iamConfig := &config.RateLimitConfig{
+		RequestsPerSecond: 35.0,              // IAM has lower rate limits
+		MaxRetries:        10,                // Keep retrying on throttling
+		BaseDelay:         1 * time.Second,   // Start with higher base delay
+		MaxDelay:          120 * time.Second, // Keep 2 minute max delay
+	}
+	rateLimiter := awslib.GetGlobalRegistry().GetRateLimiter(rateLimiterKey, iamConfig)
+
+	// Get the shared worker pool
+	pool := worker.GetSharedPool()
+
+	// Channel to collect results with enough buffer to avoid blocking
+	resultChan := make(chan *awslib.ScanResult, 10000)
+	errorChan := make(chan error, 1)
+
+	// WaitGroup to track all submitted tasks
+	var wg sync.WaitGroup
+	var activeWorkers int32
+
+	// Process users in chunks to avoid memory issues
+	processUser := func(ctx context.Context, user *iam.User) error {
+		defer wg.Done()
+		atomic.AddInt32(&activeWorkers, 1)
+		defer atomic.AddInt32(&activeWorkers, -1)
+
+		ut := &userTask{
+			user:        user,
+			iamClient:   iamClient,
+			accountID:   accountID,
+			region:      opts.Region,
+			scanner:     s,
+			opts:        opts,
+			now:         time.Now(),
+			rateLimiter: rateLimiter,
+		}
+
+		result, err := ut.processUser(ctx)
+		if err != nil {
+			if strings.Contains(err.Error(), "Throttling:") {
+				logging.Debug("Rate limited by AWS, backing off", map[string]interface{}{
+					"user_name": aws.StringValue(user.UserName),
+					"account":   accountID,
+					"region":    opts.Region,
+					"error":     err.Error(),
+				})
+				rateLimiter.OnFailure()
+				return err
+			}
+			select {
+			case errorChan <- err:
+			default:
+				logging.Error("Failed to process user", err, map[string]interface{}{
+					"user_name": aws.StringValue(user.UserName),
+					"account":   accountID,
+					"region":    opts.Region,
+				})
+			}
+			return err
+		}
+		rateLimiter.OnSuccess()
+		if result != nil {
+			select {
+			case resultChan <- result:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+
+	// Start listing users and immediately process each one
+	var results awslib.ScanResults
+	var processingError error
+	done := make(chan bool)
+
+	// Start a goroutine to collect results
+	go func() {
+		for result := range resultChan {
+			results = append(results, *result)
+		}
+		done <- true
+	}()
+
+	// List and process users
 	err = iamClient.ListUsersPages(&iam.ListUsersInput{},
 		func(page *iam.ListUsersOutput, lastPage bool) bool {
-			users = append(users, page.Users...)
-			return !lastPage
+			for _, user := range page.Users {
+				// Skip if we've encountered an error
+				select {
+				case err := <-errorChan:
+					processingError = err
+					return false
+				default:
+					// Skip users that are newer than DaysUnused
+					age := time.Since(aws.TimeValue(user.CreateDate))
+					if age.Hours()/24 <= float64(opts.DaysUnused) {
+						continue
+					}
+
+					// Immediately submit each user to the worker pool
+					user := user // Create new variable for closure
+					wg.Add(1)
+					pool.Submit(func(ctx context.Context) error {
+						return processUser(ctx, user)
+					})
+				}
+			}
+			return !lastPage && processingError == nil
 		})
+
 	if err != nil {
 		logging.Error("Failed to list IAM users", err, nil)
 		return nil, fmt.Errorf("failed to list IAM users: %w", err)
 	}
 
-	var results awslib.ScanResults
-	for _, user := range users {
-		userName := aws.StringValue(user.UserName)
-		userARN := aws.StringValue(user.Arn)
+	// Wait for all workers to complete
+	wg.Wait()
 
-		logging.Debug("Analyzing IAM user", map[string]interface{}{
-			"user_name": userName,
-			"user_arn":  userARN,
-		})
+	// Now it's safe to close the result channel
+	close(resultChan)
 
-		// Get last login time and key usage time
-		lastLoginTime, err := s.getLastConsoleLogin(iamClient, userName)
-		if err != nil {
-			logging.Error("Failed to get last console login", err, map[string]interface{}{
-				"user_name": userName,
-			})
-			continue
-		}
+	// Wait for result collection to complete
+	<-done
 
-		keyLastUsedTime, err := s.getLastKeyUsage(iamClient, userName)
-		if err != nil {
-			logging.Error("Failed to get key usage time", err, map[string]interface{}{
-				"user_name": userName,
-			})
-			continue
-		}
-
-		// Determine unused reasons
-		reasons := s.determineUnusedReasons(lastLoginTime, keyLastUsedTime, opts)
-
-		if len(reasons) > 0 {
-			// Create details map with IAM user-specific fields
-			details := map[string]interface{}{
-				"AccountId":       accountID,
-				"Region":          opts.Region,
-				"Path":            aws.StringValue(user.Path),
-				"CreateDate":      aws.TimeValue(user.CreateDate).Format(time.RFC3339),
-				"LastLoginTime":   formatTimeOrNever(lastLoginTime),
-				"LastKeyUsedTime": formatTimeOrNever(keyLastUsedTime),
-			}
-
-			// Add permissions boundary if present
-			if user.PermissionsBoundary != nil {
-				details["PermissionsBoundary"] = aws.StringValue(user.PermissionsBoundary.PermissionsBoundaryArn)
-			}
-
-			result := awslib.ScanResult{
-				ResourceType: s.Label(),
-				ResourceName: userName,
-				ResourceID:   userARN,
-				Reason:       strings.Join(reasons, "\n"),
-				Details:      details,
-			}
-
-			results = append(results, result)
-		}
+	if processingError != nil {
+		return nil, processingError
 	}
 
 	return results, nil
