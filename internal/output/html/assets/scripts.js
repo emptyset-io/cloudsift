@@ -550,3 +550,21 @@ function exportToCSV() {
     link.click();
     document.body.removeChild(link);
 }
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('details-modal');
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const closeModals = document.querySelectorAll('.close-modal');
+    closeModals.forEach(function(closeModal) {
+        closeModal.addEventListener('click', function() {
+            const modal = document.getElementById('details-modal');
+            modal.style.display = 'none';
+        });
+    });
+});

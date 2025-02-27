@@ -626,6 +626,93 @@ a:hover .filter-icon {
     stroke: currentColor;
 }
 
+   /* Modal Styles */
+   #details-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: var(--secondary-bg);
+    margin: 15% auto;
+    padding: 20px;
+    border-radius: var(--border-radius);
+    width: 80%;
+    max-width: 800px;
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.close-modal {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.close-modal:hover {
+    color: var(--accent);
+}
+
+.modal-content h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    font-size: 1.5rem;
+    padding-right: 40px;
+}
+
+.modal-content pre {
+    background-color: var(--primary-bg);
+    border-radius: var(--border-radius);
+    padding: 16px;
+    margin: 0;
+    overflow: auto;
+    max-height: 60vh;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Specific styles for #scan-table */
+#scan-table {
+    table-layout: fixed;
+}
+
+#scan-table .table-wrapper {
+    overflow-x: auto;
+    margin: 0 -1.5rem;
+    padding: 0 1.5rem;
+}
+
+#scan-table td {
+    white-space: normal;
+    word-wrap: break-word;
+    vertical-align: top;
+    padding: 12px;
+}
+
+#scan-table th {
+    position: sticky;
+    top: 0;
+    background-color: var(--accent-light);
+    z-index: 1;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .summary-block.wide,
