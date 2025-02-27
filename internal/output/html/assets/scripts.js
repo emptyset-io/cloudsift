@@ -398,22 +398,38 @@ function exportToCSV() {
     const rows = Array.from(table.querySelectorAll('tr'));
     let csvContent = "data:text/csv;charset=utf-8,";
 
-    // Get headers
+    // Get headers, excluding the Actions column and adding Details
     const headers = Array.from(rows[0].querySelectorAll('th')).map(header => {
-        // Remove the sort icon text
-        return `"${header.textContent.replace('↕', '').trim()}"`;
+        let text = header.textContent.replace('↕', '').trim();
+        return text === 'Actions' ? 'Details' : text;
     });
     csvContent += headers.join(',') + '\n';
 
     // Get data rows
     rows.slice(1).forEach(row => {
-        const cells = Array.from(row.querySelectorAll('td')).map(cell => {
-            // Get the text content, removing any HTML
+        const cells = Array.from(row.querySelectorAll('td'));
+        const rowData = cells.map((cell, index) => {
+            // For the Actions column (last column), get the details JSON
+            if (index === cells.length - 1) {
+                const detailsBtn = cell.querySelector('button');
+                if (detailsBtn) {
+                    // Get the onclick attribute which contains the details JSON
+                    const onclickAttr = detailsBtn.getAttribute('onclick');
+                    // Extract the JSON from showDetailsModal(...)
+                    const match = onclickAttr.match(/showDetailsModal\((.*)\)/);
+                    if (match && match[1]) {
+                        // Format the JSON with newlines for readability
+                        const details = JSON.stringify(JSON.parse(match[1]), null, 2);
+                        return `"${details.replace(/"/g, '""')}"`;
+                    }
+                }
+                return '""';
+            }
+            // For other columns, get the text content
             let text = cell.textContent.trim();
-            // Escape quotes and wrap in quotes
             return `"${text.replace(/"/g, '""')}"`;
         });
-        csvContent += cells.join(',') + '\n';
+        csvContent += rowData.join(',') + '\n';
     });
 
     // Create download link
