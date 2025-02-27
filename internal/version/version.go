@@ -4,7 +4,7 @@ import "fmt"
 
 var (
 	// Version is the current version of CloudSift
-	Version = "0.1.0"
+	Version = "0.1.1"
 
 	// GitCommit is the git commit hash, injected at build time
 	GitCommit string
