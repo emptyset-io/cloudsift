@@ -356,14 +356,25 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 					} else if aws.StringValue(instanceCopy.State.Name) != "running" {
 						reasons = append(reasons, fmt.Sprintf("Non-running state: %s", aws.StringValue(instanceCopy.State.Name)))
 					} else {
-						// Analyze running instances using launch time
-						usageReasons, err := s.analyzeInstanceUsage(clients.CloudWatch, instanceCopy, metricStartTime, endTime, opts.DaysUnused)
-						if err != nil {
-							logging.Error("Failed to analyze instance usage", err, map[string]interface{}{
-								"instance_id": aws.StringValue(instanceCopy.InstanceId),
-							})
+						// Only analyze instances that are old enough based on days_unused
+						instanceAge := time.Since(*instanceCopy.LaunchTime)
+						if instanceAge.Hours()/24 >= float64(opts.DaysUnused) {
+							// Analyze running instances using launch time
+							usageReasons, err := s.analyzeInstanceUsage(clients.CloudWatch, instanceCopy, metricStartTime, endTime, opts.DaysUnused)
+							if err != nil {
+								logging.Error("Failed to analyze instance usage", err, map[string]interface{}{
+									"instance_id": aws.StringValue(instanceCopy.InstanceId),
+								})
+							} else {
+								reasons = append(reasons, usageReasons...)
+							}
 						} else {
-							reasons = append(reasons, usageReasons...)
+							logging.Debug("Skipping instance usage analysis - too new", map[string]interface{}{
+								"instance_id":   aws.StringValue(instanceCopy.InstanceId),
+								"instance_age":  instanceAge.Hours()/24,
+								"days_unused":   opts.DaysUnused,
+								"launch_time":   instanceCopy.LaunchTime,
+							})
 						}
 					}
 

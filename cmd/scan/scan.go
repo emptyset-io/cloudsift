@@ -341,14 +341,32 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var baseSession *session.Session
 	var accounts []awsinternal.Account
 
-	// Create a root profile session for cost estimator (no role assumptions)
-	costEstimatorSession, err := awsinternal.NewSession(config.Config.Profile, "")
-	if err != nil {
-		logging.Error("Failed to create cost estimator session", err, nil)
-		return nil // Return nil to continue without failing
+	// Create a session with organization role for cost estimator
+	var costEstimatorSession *session.Session
+	var costErr error
+	if opts.organizationRole != "" {
+		costEstimatorSession, costErr = awsinternal.GetSessionChain(opts.organizationRole, "", "", "us-east-1")
+		if costErr != nil {
+			logging.Error("Failed to create cost estimator session with org role", costErr, map[string]interface{}{
+				"organization_role": opts.organizationRole,
+			})
+			// Fall back to root profile
+			logging.Info("Falling back to root profile for cost estimator")
+			costEstimatorSession, costErr = awsinternal.NewSession(config.Config.Profile, "us-east-1")
+			if costErr != nil {
+				logging.Error("Failed to create cost estimator session", costErr, nil)
+				return nil // Return nil to continue without failing
+			}
+		}
+	} else {
+		costEstimatorSession, costErr = awsinternal.NewSession(config.Config.Profile, "us-east-1")
+		if costErr != nil {
+			logging.Error("Failed to create cost estimator session", costErr, nil)
+			return nil // Return nil to continue without failing
+		}
 	}
 
-	// Initialize cost estimator with root profile session
+	// Initialize cost estimator with the session
 	if err := awsinternal.InitializeDefaultCostEstimator(costEstimatorSession); err != nil {
 		logging.Error("Failed to initialize cost estimator", err, nil)
 		return nil // Return nil to continue without failing
