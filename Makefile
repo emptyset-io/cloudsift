@@ -125,55 +125,6 @@ release: validate-release-type pre-release-checks lint test
 	@echo "Running tests and checks..."
 	$(MAKE) version-bump-$(RELEASE_TYPE)
 	@echo "Building and verifying..."
-	$(MAKE) build
-	@echo "Pushing changes..."
-	git push
-	git push --tags
-	@echo "Running goreleaser..."
-	goreleaser release --clean
-	@new_version=$$(git describe --tags); \
-	echo "Release $$new_version completed successfully!"
-	@echo "Release checklist:"
-	@echo "  ✓ Version bumped"
-	@echo "  ✓ Code tested and linted"
-	@echo "  ✓ Changes built and verified"
-	@echo "  ✓ Changes pushed to remote"
-	@echo "  ✓ Release created with goreleaser"
-	@echo ""
-	@echo "Next steps:"
-	@echo "1. Check the release page for the new version"
-	@echo "2. Verify the release artifacts"
-	@echo "3. Update the changelog if needed"
-
-.PHONY: release-major
-release-major:
-	$(MAKE) release RELEASE_TYPE=major
-
-.PHONY: release-minor
-release-minor:
-	$(MAKE) release RELEASE_TYPE=minor
-
-.PHONY: release-patch
-release-patch:
-	$(MAKE) release RELEASE_TYPE=patch
-
-.PHONY: example-report
-example-report:
-	@echo "Generating sample JSON data..."
-	@go run examples/jsongen/main.go
-	@echo "Generating HTML report..."
-	@go run examples/htmlgen/main.go
-	@echo "Report generated at examples/output/sample_report.html"
-
-		exit 1; \
-	fi
-
-.PHONY: release
-release: validate-release-type pre-release-checks lint test
-	@echo "Starting release process..."
-	@echo "Running tests and checks..."
-	$(MAKE) version-bump-$(RELEASE_TYPE)
-	@echo "Building and verifying..."
 	$(MAKE) build-all
 	@echo "Pushing changes..."
 	git push
@@ -194,17 +145,9 @@ release: validate-release-type pre-release-checks lint test
 	@echo "2. Verify the release artifacts"
 	@echo "3. Update the changelog if needed"
 
-.PHONY: release-major
-release-major:
-	$(MAKE) release RELEASE_TYPE=major
-
-.PHONY: release-minor
-release-minor:
-	$(MAKE) release RELEASE_TYPE=minor
-
-.PHONY: release-patch
-release-patch:
-	$(MAKE) release RELEASE_TYPE=patch
+.PHONY: release-major release-minor release-patch
+release-major release-minor release-patch: release-%:
+	$(MAKE) release RELEASE_TYPE=$*
 
 .PHONY: example-report
 example-report:
