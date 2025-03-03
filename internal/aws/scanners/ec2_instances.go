@@ -336,7 +336,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 							"instance_id": aws.StringValue(instanceCopy.InstanceId),
 							"name":        name,
 						})
-						
+
 						// Get stop time from state transition reason
 						if instanceCopy.StateTransitionReason != nil {
 							// AWS format: "User initiated (2024-02-27 11:51:43 GMT)"
@@ -347,7 +347,7 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 									stoppedDuration := time.Since(stopTime)
 									stoppedDays := int(stoppedDuration.Hours() / 24)
 									if stoppedDays >= opts.DaysUnused {
-										stoppedAgeStr := awslib.FormatTimeDifference(time.Now(), &stopTime)
+										stoppedAgeStr := utils.FormatTimeDifference(time.Now(), &stopTime)
 										reasons = append(reasons, fmt.Sprintf("Instance has been stopped for %s", stoppedAgeStr))
 									}
 								}
@@ -370,10 +370,10 @@ func (s *EC2InstanceScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 							}
 						} else {
 							logging.Debug("Skipping instance usage analysis - too new", map[string]interface{}{
-								"instance_id":   aws.StringValue(instanceCopy.InstanceId),
-								"instance_age":  instanceAge.Hours()/24,
-								"days_unused":   opts.DaysUnused,
-								"launch_time":   instanceCopy.LaunchTime,
+								"instance_id":  aws.StringValue(instanceCopy.InstanceId),
+								"instance_age": instanceAge.Hours() / 24,
+								"days_unused":  opts.DaysUnused,
+								"launch_time":  instanceCopy.LaunchTime,
 							})
 						}
 					}

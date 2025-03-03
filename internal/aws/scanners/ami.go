@@ -105,7 +105,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 
 	age := t.now.Sub(creationDate)
 	ageInDays := int(age.Hours() / 24)
-	ageString := awslib.FormatTimeDifference(t.now, &creationDate)
+	ageString := utils.FormatTimeDifference(t.now, &creationDate)
 
 	// Skip if AMI is not old enough
 	if ageInDays < t.opts.DaysUnused {
@@ -147,7 +147,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 				// Calculate cost for this snapshot
 				if costEstimator != nil {
 					costs, err := costEstimator.CalculateCost(awslib.ResourceCostConfig{
-						ResourceType:  "EBSSnapshots",
+						ResourceType: "EBSSnapshots",
 						ResourceSize: snapshotSize,
 						Region:       t.opts.Region,
 						CreationTime: creationDate, // Use AMI creation date for all snapshots
@@ -155,11 +155,11 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 					})
 					if err != nil {
 						logging.Error("Failed to calculate costs for snapshot", err, map[string]interface{}{
-							"account_id":    t.accountID,
-							"region":        t.opts.Region,
-							"snapshot_id":   aws.StringValue(blockDevice.Ebs.SnapshotId),
-							"volume_type":   volumeType,
-							"duration_ms":   time.Since(costStart).Milliseconds(),
+							"account_id":  t.accountID,
+							"region":      t.opts.Region,
+							"snapshot_id": aws.StringValue(blockDevice.Ebs.SnapshotId),
+							"volume_type": volumeType,
+							"duration_ms": time.Since(costStart).Milliseconds(),
 						})
 					} else {
 						// Add costs to total
@@ -191,10 +191,10 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		totalCosts.Lifetime = &lifetime
 
 		logging.Debug("Cost calculation completed", map[string]interface{}{
-			"resource_id": amiID,
-			"duration_ms": time.Since(costStart).Milliseconds(),
+			"resource_id":   amiID,
+			"duration_ms":   time.Since(costStart).Milliseconds(),
 			"hours_running": hoursRunning,
-			"hourly_rate": totalCosts.HourlyRate,
+			"hourly_rate":   totalCosts.HourlyRate,
 			"lifetime_cost": lifetime,
 		})
 	}
@@ -217,7 +217,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 			"root_device":   aws.StringValue(t.ami.RootDeviceName),
 			"age_days":      ageInDays,
 		},
-		"snapshots": snapshotDetails,
+		"snapshots":              snapshotDetails,
 		"total_snapshot_size_gb": totalSnapshotSize,
 	}
 
@@ -230,7 +230,7 @@ func (t *amiTask) processAMI(ctx context.Context) (*awslib.ScanResult, error) {
 		resourceName = name
 	}
 
-	reason := fmt.Sprintf("AMI has not been used by any instances for %s and has %.2f GB in associated snapshots", 
+	reason := fmt.Sprintf("AMI has not been used by any instances for %s and has %.2f GB in associated snapshots",
 		ageString, float64(totalSnapshotSize))
 
 	return &awslib.ScanResult{
@@ -256,18 +256,11 @@ func (s *AMIScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		return nil, fmt.Errorf("failed to create regional session: %w", err)
 	}
 
-	// Get current account ID
-	accountID, err := utils.GetAccountID(sess)
-	if err != nil {
-		logging.Error("Failed to get caller identity", err, nil)
-		return nil, fmt.Errorf("failed to get caller identity: %w", err)
-	}
-
 	// Create EC2 client
 	ec2Client := ec2.New(sess)
 
 	// Create rate limiter specific to this account/region
-	rateLimiterKey := fmt.Sprintf("%s-%s-ami", accountID, opts.Region)
+	rateLimiterKey := fmt.Sprintf("%s-%s-ami", opts.AccountID, opts.Region)
 	rateConfig := &config.RateLimitConfig{
 		RequestsPerSecond: 35.0,                   // EC2 API has higher rate limits
 		MaxRetries:        10,                     // Keep retrying on throttling
@@ -316,7 +309,7 @@ func (s *AMIScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 		task := &amiTask{
 			ami:         ami,
 			ec2Client:   ec2Client,
-			accountID:   accountID,
+			accountID:   opts.AccountID,
 			region:      opts.Region,
 			scanner:     s,
 			opts:        opts,
@@ -334,9 +327,9 @@ func (s *AMIScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				case errorChan <- err:
 				default:
 					logging.Error("Failed to process AMI", err, map[string]interface{}{
-						"ami_id":   aws.StringValue(task.ami.ImageId),
-						"account":  accountID,
-						"region":   opts.Region,
+						"ami_id":  aws.StringValue(task.ami.ImageId),
+						"account": opts.AccountID,
+						"region":  opts.Region,
 					})
 				}
 				return err

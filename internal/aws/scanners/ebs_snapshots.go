@@ -5,6 +5,7 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
+	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/logging"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -189,7 +190,7 @@ func (s *EBSSnapshotScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, 
 			// Calculate age of snapshot
 			age := time.Since(*snapshot.StartTime)
 			ageInDays := int(age.Hours() / 24)
-			ageString := awslib.FormatTimeDifference(time.Now(), snapshot.StartTime)
+			ageString := utils.FormatTimeDifference(time.Now(), snapshot.StartTime)
 
 			details := map[string]interface{}{
 				"snapshot_id":   aws.StringValue(snapshot.SnapshotId),

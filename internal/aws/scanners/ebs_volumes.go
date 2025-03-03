@@ -160,7 +160,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 				continue
 			}
 
-			ageString := awslib.FormatTimeDifference(time.Now(), lastUsedTime)
+			ageString := utils.FormatTimeDifference(time.Now(), lastUsedTime)
 
 			// Convert AWS tags to map
 			tags := make(map[string]string)
@@ -248,7 +248,7 @@ func (s *EBSVolumeScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, er
 			// Get volume metrics with error handling
 			volumeID := aws.StringValue(volume.VolumeId)
 			endTime := time.Now().UTC().Truncate(time.Minute)
-			daysUnused := awslib.Max(1, opts.DaysUnused)
+			daysUnused := utils.Max(1, opts.DaysUnused)
 			metricStartTime := endTime.Add(-time.Duration(daysUnused) * 24 * time.Hour)
 			metrics, err := s.getVolumeMetrics(clients.CloudWatch, volumeID, metricStartTime, endTime)
 			if err != nil {

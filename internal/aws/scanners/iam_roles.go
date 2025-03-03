@@ -9,6 +9,7 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
+	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/worker"
@@ -88,7 +89,7 @@ func (t *roleTask) processRole(ctx context.Context) (*awslib.ScanResult, error) 
 	if lastUsed.IsZero() {
 		lastUsed = aws.TimeValue(t.role.CreateDate)
 	}
-	ageString := awslib.FormatTimeDifference(t.now, &lastUsed)
+	ageString := utils.FormatTimeDifference(t.now, &lastUsed)
 
 	// Determine unused reasons
 	reasons := t.scanner.determineUnusedReasons(lastUsedTime, attachedPolicies, inlinePolicies, instanceProfiles, ageString, t.opts.DaysUnused, t.opts)

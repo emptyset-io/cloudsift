@@ -9,6 +9,7 @@ import (
 	"time"
 
 	awslib "cloudsift/internal/aws"
+	"cloudsift/internal/aws/utils"
 	"cloudsift/internal/config"
 	"cloudsift/internal/logging"
 	"cloudsift/internal/worker"
@@ -114,7 +115,7 @@ func (t *userTask) processUser(ctx context.Context) (*awslib.ScanResult, error) 
 		lastUsedTime = t.user.CreateDate
 	}
 
-	ageString := awslib.FormatTimeDifference(t.now, lastUsedTime)
+	ageString := utils.FormatTimeDifference(t.now, lastUsedTime)
 
 	// Determine unused reasons
 	reasons := t.scanner.determineUnusedReasons(lastLoginTime, keyLastUsedTime, t.opts)
@@ -205,7 +206,7 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 	} else {
 		age := time.Since(*lastLoginTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			loginAge := awslib.FormatTimeDifference(now, lastLoginTime)
+			loginAge := utils.FormatTimeDifference(now, lastLoginTime)
 			reasons = append(reasons, fmt.Sprintf("User has not logged in to the console in %s", loginAge))
 		}
 	}
@@ -216,7 +217,7 @@ func (s *IAMUserScanner) determineUnusedReasons(lastLoginTime, keyLastUsedTime *
 	} else {
 		age := time.Since(*keyLastUsedTime)
 		if age.Hours()/24 > float64(opts.DaysUnused) {
-			keyAge := awslib.FormatTimeDifference(now, keyLastUsedTime)
+			keyAge := utils.FormatTimeDifference(now, keyLastUsedTime)
 			reasons = append(reasons, fmt.Sprintf("User has not used access keys in %s", keyAge))
 		}
 	}
