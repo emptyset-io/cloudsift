@@ -50,11 +50,4 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build binaries
-        run: make build-all
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: bin/
-          retention-days: 7
+        run: make build
