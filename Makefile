@@ -52,7 +52,7 @@ test:
 	$(GO) test -v ./...
 
 .PHONY: build
-build: deps
+build: deps lint test 
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)
@@ -125,7 +125,7 @@ release: validate-release-type pre-release-checks lint test
 	@echo "Running tests and checks..."
 	$(MAKE) version-bump-$(RELEASE_TYPE)
 	@echo "Building and verifying..."
-	$(MAKE) build-all
+	$(MAKE) build
 	@echo "Pushing changes..."
 	git push
 	git push --tags
