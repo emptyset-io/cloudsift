@@ -128,12 +128,16 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				Details:      details,
 			}
 
-			// // Calculate cost
+			// Calculate cost
 			costConfig := awslib.ResourceCostConfig{
 				ResourceType: "RDS",
 				ResourceSize: aws.StringValue(instance.DBInstanceClass),
 				Region:       opts.Region,
 				CreationTime: aws.TimeValue(instance.InstanceCreateTime),
+				StorageSize:  aws.Int64Value(instance.AllocatedStorage),
+				VolumeType:   aws.StringValue(instance.StorageType),
+				MultiAZ:      aws.BoolValue(instance.MultiAZ),
+				Engine:       aws.StringValue(instance.Engine),
 			}
 
 			if cost, err := awslib.DefaultCostEstimator.CalculateCost(costConfig); err != nil {
@@ -142,12 +146,7 @@ func (s *RDSScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				})
 			} else if cost != nil {
 				result.Cost = map[string]interface{}{
-					"hourly_rate":   cost.HourlyRate,
-					"daily_rate":    cost.DailyRate,
-					"monthly_rate":  cost.MonthlyRate,
-					"yearly_rate":   cost.YearlyRate,
-					"hours_running": cost.HoursRunning,
-					"lifetime":      cost.Lifetime,
+					"total": cost,
 				}
 			}
 
