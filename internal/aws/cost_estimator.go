@@ -40,6 +40,8 @@ type ResourceCostConfig struct {
 	ProcessedGB   float64 // Processed GB for load balancers
 	InstanceCount int64   // Instance count for OpenSearch
 	StorageSize   int64   // Storage size for OpenSearch
+	MultiAZ       bool    // Multi-AZ for RDS
+	Engine        string  // Database engine for RDS
 }
 
 // AWS region to location name mapping for pricing API
@@ -669,16 +671,12 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			return 0, fmt.Errorf("invalid resource size type for RDS: %T", config.ResourceSize)
 		}
 
-		filters = []*pricing.Filter{
+		// Get instance price
+		instanceFilters := []*pricing.Filter{
 			{
 				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("servicecode"),
 				Value: aws.String("AmazonRDS"),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("instanceType"),
-				Value: aws.String(instanceClass),
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
@@ -687,31 +685,127 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("deploymentOption"),
-				Value: aws.String("Single-AZ"),
+				Field: aws.String("instanceType"),
+				Value: aws.String(instanceClass),
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("databaseEngine"),
-				Value: aws.String("MySQL"), // Default to MySQL pricing
+				Field: aws.String("productFamily"),
+				Value: aws.String("Database Instance"),
 			},
 		}
 
-		price, err := ce.getPriceFromAPI(filters)
+		// Log the filters for debugging
+		logging.Debug("RDS instance pricing filters", map[string]interface{}{
+			"filters":        instanceFilters,
+			"instance_class": instanceClass,
+			"region":        region,
+			"location":      location,
+			"engine":        config.Engine,
+		})
+
+		// First try to get any RDS instance pricing to see what fields are available
+		input := &pricing.GetProductsInput{
+			ServiceCode: aws.String("AmazonRDS"),
+			Filters:    instanceFilters,
+		}
+
+		result, err := ce.pricingClient.GetProducts(input)
+		if err != nil {
+			logging.Error("Failed to get RDS products", err, map[string]interface{}{
+				"filters": instanceFilters,
+			})
+		} else {
+			logging.Debug("RDS pricing API response", map[string]interface{}{
+				"price_list_count": len(result.PriceList),
+				"first_item":      result.PriceList[0],
+			})
+		}
+
+		instancePrice, err := ce.getPriceFromAPI(instanceFilters)
 		if err != nil {
 			logging.Error("Failed to get RDS instance price", err, map[string]interface{}{
 				"instance_class": instanceClass,
-				"region":         region,
+				"region":        region,
+				"filters":       instanceFilters,
 			})
 			// Fallback to default rate if pricing API fails
-			price = 0.005
+			instancePrice = 0.005
+		}
+
+		// Get storage price
+		storageFilters := []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonRDS"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("productFamily"),
+				Value: aws.String("Database Storage"),
+			},
+		}
+
+		// Log the filters for debugging
+		logging.Debug("RDS storage pricing filters", map[string]interface{}{
+			"filters":     storageFilters,
+			"region":     region,
+			"location":   location,
+			"engine":     config.Engine,
+			"volumeType": config.VolumeType,
+		})
+
+		// First try to get any storage pricing to see what fields are available
+		input = &pricing.GetProductsInput{
+			ServiceCode: aws.String("AmazonRDS"),
+			Filters:    storageFilters,
+		}
+
+		result, err = ce.pricingClient.GetProducts(input)
+		if err != nil {
+			logging.Error("Failed to get RDS storage products", err, map[string]interface{}{
+				"filters": storageFilters,
+			})
+		} else {
+			logging.Debug("RDS storage pricing API response", map[string]interface{}{
+				"price_list_count": len(result.PriceList),
+				"first_item":      result.PriceList[0],
+			})
+		}
+
+		// Get storage price per GB per month
+		storagePrice, err := ce.getPriceFromAPI(storageFilters)
+		if err != nil {
+			logging.Error("Failed to get RDS storage price", err, map[string]interface{}{
+				"volume_type": config.VolumeType,
+				"region":      region,
+				"filters":     storageFilters,
+			})
+			// Fallback to default storage rate if pricing API fails
+			storagePrice = 0.115 / (24 * 30) // $0.115 per GB-month converted to hourly
+		}
+
+		// Calculate total cost
+		// Storage price is per GB per month, convert to per hour
+		storagePricePerHour := (storagePrice * float64(config.StorageSize)) / (24 * 30) // Approximate month to 30 days
+		totalCost := instancePrice + storagePricePerHour
+
+		// If Multi-AZ, double both instance and storage costs
+		if config.MultiAZ {
+			totalCost = (instancePrice * 2) + (storagePricePerHour * 2)
 		}
 
 		ce.cacheLock.Lock()
-		ce.priceCache[cacheKey] = price
+		ce.priceCache[cacheKey] = totalCost
 		ce.cacheLock.Unlock()
 
-		return price, nil
+		return totalCost, nil
 	case "ElasticIP":
 		// Elastic IPs have a flat rate of $0.005 per hour when not attached
 		hourlyRate := roundCost(0.005) // $0.005 per hour
@@ -1050,17 +1144,28 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 	case "RDS":
 		// For RDS, price is already per hour
 		hourlyPrice = pricePerUnit
+
+		// If Multi-AZ, double the price
+		if config.MultiAZ {
+			hourlyPrice *= 2
+		}
+
 		dailyPrice := hourlyPrice * 24
 		monthlyPrice := dailyPrice * 30 // Approximate
 		yearlyPrice := dailyPrice * 365
+
+		// Calculate lifetime cost based on hours running
+		lifetimeHours := time.Since(config.CreationTime).Hours()
+		lifetime := hourlyPrice * lifetimeHours
+		hours := roundCost(lifetimeHours)
 
 		return &CostBreakdown{
 			HourlyRate:   roundCost(hourlyPrice),
 			DailyRate:    roundCost(dailyPrice),
 			MonthlyRate:  roundCost(monthlyPrice),
 			YearlyRate:   roundCost(yearlyPrice),
-			HoursRunning: nil, // Hours running should be stored in details
-			Lifetime:     nil, // Lifetime will be calculated by the application
+			HoursRunning: &hours,
+			Lifetime:     &lifetime,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported resource type: %s", config.ResourceType)
