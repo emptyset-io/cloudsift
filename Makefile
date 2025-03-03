@@ -52,7 +52,7 @@ test:
 	$(GO) test -v ./...
 
 .PHONY: build
-build: deps lint test 
+build: deps
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)
