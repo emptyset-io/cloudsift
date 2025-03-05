@@ -5,5 +5,6 @@ output
 cache
 reports
 testdata
+coverage.out
 sample_scan_data.json
 /dist/

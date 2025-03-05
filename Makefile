@@ -4,7 +4,13 @@ BUILD_DIR := bin
 BINARY_NAME := cloudsift
 
 # Build information
-VERSION := $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
+# Improved version detection that handles non-standard git describe output
+VERSION := $(shell git fetch --tags 2>/dev/null || true; \
+	raw_version=$$(git describe --tags 2>/dev/null || echo "v0.0.0"); \
+	if [ "$$raw_version" = "v0.0.0" ]; then \
+		raw_version=$$(git tag -l 'v*' | sort -V | tail -n 1 || echo "v0.0.0"); \
+	fi; \
+	echo "$$raw_version" | grep -oE '^v?[0-9]+\.[0-9]+\.[0-9]+' || echo "v0.0.0")
 COMMIT := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S')
 GO_VERSION := $(shell $(GO) version | cut -d ' ' -f 3)
@@ -49,7 +55,13 @@ lint: install-lint
 
 .PHONY: test
 test:
-	$(GO) test -v ./...
+	$(GO) test -v -coverprofile=coverage.out ./...
+	
+
+.PHONY: test-html
+test-html: test
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated at coverage.html"
 
 .PHONY: build
 build: deps
@@ -87,13 +99,28 @@ validate-release-type:
 
 .PHONY: version-bump-major version-bump-minor version-bump-patch
 version-bump-major version-bump-minor version-bump-patch: version-bump-%:
-	@current_version=$$(git describe --tags 2>/dev/null | sed 's/^v//' || echo "0.0.0"); \
-	if [ "$$current_version" = "" ]; then \
-		current_version="0.0.0"; \
+	@echo "Determining current version..."
+	@git fetch --tags 2>/dev/null || true
+	@current_version=$$(git describe --tags 2>/dev/null | grep -oE '^v?[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0"); \
+	if [ -z "$$current_version" ]; then \
+		# Try to get the latest tag as a fallback \
+		current_version=$$(git tag -l 'v*' | sort -V | tail -n 1 | grep -oE '^v?[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0"); \
+		if [ -z "$$current_version" ]; then \
+			echo "No version tag found, starting from 0.0.0"; \
+			current_version="0.0.0"; \
+		else \
+			echo "Found latest tag: $$current_version"; \
+		fi; \
+	else \
+		echo "Found version tag: $$current_version"; \
 	fi; \
+	# Remove 'v' prefix if present \
+	current_version=$${current_version#v}; \
+	echo "Parsed version: $$current_version"; \
 	major=$$(echo $$current_version | cut -d. -f1); \
 	minor=$$(echo $$current_version | cut -d. -f2); \
 	patch=$$(echo $$current_version | cut -d. -f3); \
+	echo "Current version components: major=$$major, minor=$$minor, patch=$$patch"; \
 	case "$*" in \
 		major) new_version=$$((major + 1)).0.0 ;; \
 		minor) new_version=$$major.$$((minor + 1)).0 ;; \
@@ -105,7 +132,14 @@ version-bump-major version-bump-minor version-bump-patch: version-bump-%:
 
 .PHONY: version
 version:
-	@echo "Current version: $(VERSION)"
+	@git fetch --tags 2>/dev/null || true
+	@raw_version=$$(git describe --tags 2>/dev/null || echo "v0.0.0"); \
+	if [ "$$raw_version" = "v0.0.0" ]; then \
+		# Try to get the latest tag as a fallback \
+		raw_version=$$(git tag -l 'v*' | sort -V | tail -n 1 || echo "v0.0.0"); \
+	fi; \
+	semantic_version=$$(echo "$$raw_version" | grep -oE '^v?[0-9]+\.[0-9]+\.[0-9]+' || echo "v0.0.0"); \
+	echo "Current version: $$raw_version (semantic: $$semantic_version)"
 
 .PHONY: pre-release-checks
 pre-release-checks:
