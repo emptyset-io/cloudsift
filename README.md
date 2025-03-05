@@ -1,4 +1,5 @@
 <!-- PROJECT LOGO -->
+
 <br />
 <div align="center">
   <a href="https://github.com/othneildrew/Best-README-Template">
@@ -157,11 +158,89 @@ If you prefer to set up the infrastructure manually or need customization, creat
 - A Scanner Role that can be assumed in member accounts
 - An S3 bucket with server-side encryption for storing scan results
 
-See [AWS Permissions](#aws-permissions) for detailed IAM policy requirements.
+The required permissions are detailed below.
+
+### AWS Permissions
+
+#### Organization Role Permissions
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": "sts:AssumeRole",
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::<account_id>:role/<scanner_role>"
+            ]
+        },
+        {
+            "Action": [
+                "organizations:ListAccounts",
+                "organizations:DescribeAccount",
+                "ec2:DescribeRegions"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+#### Scanner Role Permissions
+
+The scanner role requires the AWS-managed `ReadOnlyAccess` policy and the following trust relationship:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<organization_account_id>:role/<organization_role>"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
+```
+
+##### Optional S3 Permissions  
+If you want to enable S3-based file output, the organization role must also have permissions to read and write to an S3 bucket. The following policy grants the necessary access to `<bucket_name>`:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:ListBucket",
+                "s3:GetBucketLocation",
+                "s3:DeleteObject",
+                "s3:ListMultipartUploadParts",
+                "s3:ListBucketMultipartUploads"
+            ],
+            "Resource": "arn:aws:s3:::<bucket_name>/*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::<bucket_name>"
+        }
+    ]
+}
+```
+
+These S3 permissions are optional and only required if you intend to upload scan results to S3.
 
 #### Automated CloudFormation Setup
 
-For convenience, we provide a CloudFormation template that automatically sets up all required infrastructure. This is entirely optional and only needed for multi-account scanning.
+For convenience, we provide a CloudFormation template that automatically sets up all required infrastructure, including all the IAM roles and permissions detailed above. This is entirely optional and only needed for multi-account scanning.
 
 ⚠️ **Important**: Deploy this template in your AWS Organization's management account.
 
@@ -432,84 +511,6 @@ View a sample CloudSift report [here](https://emptyset-io.github.io/cloudsift/ex
 - Usage patterns and recommendations
 
 *Note: The example uses generated sample data and does not reflect real AWS resources or costs.*
-
-## AWS Permissions
-
-### Organization Role Permissions
-
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Action": "sts:AssumeRole",
-            "Effect": "Allow",
-            "Resource": [
-                "arn:aws:iam::<account_id>:role/<scanner_role>"
-            ]
-        },
-        {
-            "Action": [
-                "organizations:ListAccounts",
-                "organizations:DescribeAccount",
-                "ec2:DescribeRegions"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        }
-    ]
-}
-```
-
-### Scanner Role Permissions
-
-The scanner role requires the AWS-managed `ReadOnlyAccess` policy and the following trust relationship:
-
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::<organization_account_id>:role/<organization_role>"
-            },
-            "Action": "sts:AssumeRole"
-        }
-    ]
-}
-```
-
-##### Optional S3 Permissions  
-If you want to enable S3-based file output, the organization role must also have permissions to read and write to an S3 bucket. The following policy grants the necessary access to `<bucket_name>`:
-
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:PutObject",
-                "s3:GetObject",
-                "s3:ListBucket",
-                "s3:GetBucketLocation",
-                "s3:DeleteObject",
-                "s3:ListMultipartUploadParts",
-                "s3:ListBucketMultipartUploads"
-            ],
-            "Resource": "arn:aws:s3:::<bucket_name>/*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": "s3:ListBucket",
-            "Resource": "arn:aws:s3:::<bucket_name>"
-        }
-    ]
-}
-```
-
-These S3 permissions are optional and only required if you intend to upload scan results to S3.
 
 ## Contributing
 

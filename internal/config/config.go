@@ -1,7 +1,5 @@
 package config
 
-import "runtime"
-
 // GlobalConfig holds the global configuration for the application
 type GlobalConfig struct {
 	// Profile is the AWS profile to use
@@ -57,7 +55,4 @@ type GlobalConfig struct {
 }
 
 // Config is the global configuration instance
-var Config = &GlobalConfig{
-	Profile:    "default",            // Default to "default" profile
-	MaxWorkers: runtime.NumCPU() * 8, // Default to 4x CPU cores since tasks are I/O bound
-}
+var Config = &GlobalConfig{}
