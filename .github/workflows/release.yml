@@ -65,6 +65,16 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1)
+          CHANGELOG=$(git log --pretty=format:"• %s (%an)" ${PREVIOUS_TAG}..HEAD)
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -101,6 +111,13 @@ jobs:
                   "text": {
                     "type": "mrkdwn",
                     "text": "📦 Docker images published:\n• `emptyset/cloudsift:latest`\n• `emptyset/cloudsift:${{ steps.get_version.outputs.version }}`"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "📝 *Changes since ${{ steps.changelog.outputs.previous_tag }}:*\n${{ env.CHANGELOG }}"
                   }
                 },
                 {
