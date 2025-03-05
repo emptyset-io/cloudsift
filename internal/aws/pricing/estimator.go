@@ -59,6 +59,7 @@ func NewCostEstimator(sess *session.Session, cacheFile string) (*CostEstimator, 
 			"ELB":         &calculators.ELBCalculator{},
 			"DynamoDB":    &calculators.DynamoDBCalculator{},
 			"OpenSearch":  &calculators.OpenSearchCalculator{},
+			"NATGateway":  &calculators.NATGatewayCalculator{},
 		},
 	}
 
@@ -234,6 +235,8 @@ func (ce *CostEstimator) calculateWithPrice(calc interface{}, price float64, con
 		return c.CalculateCost(price), nil
 	case *calculators.OpenSearchCalculator:
 		return c.CalculateCost(price, config), nil
+	case *calculators.NATGatewayCalculator:
+		return c.CalculateCost(price), nil
 	default:
 		return nil, fmt.Errorf("unsupported calculator type for resource: %s", config.ResourceType)
 	}
@@ -251,6 +254,8 @@ func (ce *CostEstimator) getFiltersForResource(calc interface{}, config models.R
 	case *calculators.DynamoDBCalculator:
 		return c.GetPricingFilters(config, location)
 	case *calculators.OpenSearchCalculator:
+		return c.GetPricingFilters(config, location)
+	case *calculators.NATGatewayCalculator:
 		return c.GetPricingFilters(config, location)
 	default:
 		return nil, fmt.Errorf("unsupported calculator type for resource: %s", config.ResourceType)

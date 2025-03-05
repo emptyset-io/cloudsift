@@ -810,6 +810,44 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		// Elastic IPs have a flat rate of $0.005 per hour when not attached
 		hourlyRate := roundCost(0.005) // $0.005 per hour
 		return hourlyRate, nil
+	case "NATGateway":
+		// NAT Gateways have a flat hourly rate based on region
+		// Pricing varies by region, but we'll use a standard rate as fallback
+		filters := []*pricing.Filter{
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("servicecode"),
+				Value: aws.String("AmazonEC2"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("location"),
+				Value: aws.String(location),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("productFamily"),
+				Value: aws.String("NAT Gateway"),
+			},
+			{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("usagetype"),
+				Value: aws.String("NatGateway-Hours"),
+			},
+		}
+
+		// Get NAT Gateway hourly price
+		hourlyRate, err := ce.getPriceFromAPI(filters)
+		if err != nil {
+			logging.Error("Failed to get NAT Gateway price, using default", err, map[string]interface{}{
+				"region":  region,
+				"filters": filters,
+			})
+			// Default hourly rate if pricing API fails
+			hourlyRate = 0.045 // $0.045 per hour
+		}
+
+		return hourlyRate, nil
 	default:
 		cacheKey = fmt.Sprintf("%s:%s", resourceType, region)
 	}
@@ -1150,6 +1188,26 @@ func (ce *CostEstimator) CalculateCost(config ResourceCostConfig) (*CostBreakdow
 			hourlyPrice *= 2
 		}
 
+		dailyPrice := hourlyPrice * 24
+		monthlyPrice := dailyPrice * 30 // Approximate
+		yearlyPrice := dailyPrice * 365
+
+		// Calculate lifetime cost based on hours running
+		lifetimeHours := time.Since(config.CreationTime).Hours()
+		lifetime := hourlyPrice * lifetimeHours
+		hours := roundCost(lifetimeHours)
+
+		return &CostBreakdown{
+			HourlyRate:   roundCost(hourlyPrice),
+			DailyRate:    roundCost(dailyPrice),
+			MonthlyRate:  roundCost(monthlyPrice),
+			YearlyRate:   roundCost(yearlyPrice),
+			HoursRunning: &hours,
+			Lifetime:     &lifetime,
+		}, nil
+	case "NATGateway":
+		// For NAT Gateway, price is already per hour
+		hourlyPrice = pricePerUnit
 		dailyPrice := hourlyPrice * 24
 		monthlyPrice := dailyPrice * 30 // Approximate
 		yearlyPrice := dailyPrice * 365
