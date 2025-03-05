@@ -31,6 +31,10 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOPATH := $(shell go env GOPATH)
 GOLANGCI_LINT_PATH := $(GOPATH)/bin/golangci-lint
 
+# Check if goreleaser is installed
+GORELEASER := $(shell command -v goreleaser 2> /dev/null)
+GORELEASER_PATH := $(GOPATH)/bin/goreleaser
+
 .PHONY: all
 all: clean deps fmt build
 
@@ -47,6 +51,16 @@ install-lint:
 	@if [ ! -f "$(GOLANGCI_LINT_PATH)" ]; then \
 		echo "Installing golangci-lint..."; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin; \
+	fi
+
+.PHONY: install-goreleaser
+install-goreleaser:
+	@if [ -z "$(GORELEASER)" ]; then \
+		echo "Installing goreleaser..."; \
+		go install github.com/goreleaser/goreleaser/v2@latest; \
+		echo "goreleaser installed to $(GORELEASER_PATH)"; \
+	else \
+		echo "goreleaser is already installed"; \
 	fi
 
 .PHONY: lint
@@ -144,7 +158,7 @@ pre-release-checks:
 	fi
 
 .PHONY: release
-release: validate-release-type pre-release-checks lint test
+release: validate-release-type pre-release-checks lint test install-goreleaser
 	@echo "Starting release process..."
 	@echo "Running tests and checks..."
 	$(MAKE) version-bump-$(RELEASE_TYPE)
@@ -152,13 +166,12 @@ release: validate-release-type pre-release-checks lint test
 	git push
 	git push --tags
 	@echo "Running goreleaser..."
-	goreleaser release --clean
+	$(GORELEASER_PATH) release --clean
 	@new_version=$$(git describe --tags); \
 	echo "Release $$new_version completed successfully!"
 	@echo "Release checklist:"
 	@echo "  ✓ Version bumped"
 	@echo "  ✓ Code tested and linted"
-	@echo "  ✓ Changes built and verified"
 	@echo "  ✓ Changes pushed to remote"
 	@echo "  ✓ Release created with goreleaser"
 	@echo ""
