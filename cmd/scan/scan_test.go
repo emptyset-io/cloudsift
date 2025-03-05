@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,61 +197,79 @@ func TestGetScanners(t *testing.T) {
 
 	// Test cases
 	tests := []struct {
-		name          string
-		scannerList   string
-		expectedCount int
-		expectedError bool
-		expectedNames []string
+		name                string
+		scannerList         string
+		expectedCount       int
+		expectedError       bool
+		expectedNames       []string
+		expectedInvalidCount int
+		expectedInvalidNames []string
 	}{
 		{
-			name:          "all scanners",
-			scannerList:   "",
-			expectedCount: 2,
-			expectedError: false,
-			expectedNames: []string{"scanner1", "scanner2"},
+			name:                "all scanners",
+			scannerList:         "",
+			expectedCount:       2,
+			expectedError:       false,
+			expectedNames:       []string{"scanner1", "scanner2"},
+			expectedInvalidCount: 0,
+			expectedInvalidNames: []string{},
 		},
 		{
-			name:          "specific scanner",
-			scannerList:   "scanner1",
-			expectedCount: 1,
-			expectedError: false,
-			expectedNames: []string{"scanner1"},
+			name:                "specific scanner",
+			scannerList:         "scanner1",
+			expectedCount:       1,
+			expectedError:       false,
+			expectedNames:       []string{"scanner1"},
+			expectedInvalidCount: 0,
+			expectedInvalidNames: []string{},
 		},
 		{
-			name:          "multiple scanners",
-			scannerList:   "scanner1,scanner2",
-			expectedCount: 2,
-			expectedError: false,
-			expectedNames: []string{"scanner1", "scanner2"},
+			name:                "multiple scanners",
+			scannerList:         "scanner1,scanner2",
+			expectedCount:       2,
+			expectedError:       false,
+			expectedNames:       []string{"scanner1", "scanner2"},
+			expectedInvalidCount: 0,
+			expectedInvalidNames: []string{},
 		},
 		{
-			name:          "invalid scanner",
-			scannerList:   "invalid-scanner",
-			expectedCount: 0,
-			expectedError: true,
-			expectedNames: []string{},
+			name:                "invalid scanner",
+			scannerList:         "invalid-scanner",
+			expectedCount:       0,
+			expectedError:       false,
+			expectedNames:       []string{},
+			expectedInvalidCount: 1,
+			expectedInvalidNames: []string{"invalid-scanner"},
 		},
 		{
-			name:          "mixed valid and invalid",
-			scannerList:   "scanner1,invalid-scanner",
-			expectedCount: 0,
-			expectedError: true,
-			expectedNames: []string{},
+			name:                "mixed valid and invalid",
+			scannerList:         "scanner1,invalid-scanner",
+			expectedCount:       1,
+			expectedError:       false,
+			expectedNames:       []string{"scanner1"},
+			expectedInvalidCount: 1,
+			expectedInvalidNames: []string{"invalid-scanner"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Patch the getScanners function for the invalid scanner test
-			getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerList string) ([]awsinternal.Scanner, error) {
-				// For the invalid scanner test, return an error
+			getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerList string) ([]awsinternal.Scanner, []string, error) {
+				var scanners []awsinternal.Scanner
+				var invalidScanners []string
+
+				// For the invalid scanner test, return an empty list and track invalid scanners
 				if scannerList == "invalid-scanner" {
-					return nil, fmt.Errorf("scanner invalid-scanner not found")
+					invalidScanners = append(invalidScanners, "invalid-scanner")
+					return scanners, invalidScanners, nil
 				}
 
-				// For mixed valid and invalid, return an error
+				// For mixed valid and invalid, return only valid scanners and track invalid ones
 				if scannerList == "scanner1,invalid-scanner" {
-					return nil, fmt.Errorf("scanner invalid-scanner not found")
+					scanners = append(scanners, &testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"})
+					invalidScanners = append(invalidScanners, "invalid-scanner")
+					return scanners, invalidScanners, nil
 				}
 
 				// For other cases, return the requested scanners
@@ -259,33 +278,34 @@ func TestGetScanners(t *testing.T) {
 					return []awsinternal.Scanner{
 						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
 						&testScanner{name: "scanner2", argumentName: "scanner2", label: "Scanner 2"},
-					}, nil
+					}, invalidScanners, nil
 				} else if scannerList == "scanner1" {
 					return []awsinternal.Scanner{
 						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
-					}, nil
+					}, invalidScanners, nil
 				} else if scannerList == "scanner1,scanner2" {
 					return []awsinternal.Scanner{
 						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
 						&testScanner{name: "scanner2", argumentName: "scanner2", label: "Scanner 2"},
-					}, nil
+					}, invalidScanners, nil
 				}
 
 				// Default case
 				return []awsinternal.Scanner{
 					&testScanner{name: "Scanner 1", argumentName: "scanner1", label: "Test Scanner"},
-				}, nil
+				}, invalidScanners, nil
 			})
 			require.NoError(t, err)
 			defer safeUnpatch(getScannersPatch)
 
-			scanners, err := getScanners(tt.scannerList)
+			scanners, invalidScanners, err := getScanners(tt.scannerList)
 
 			if tt.expectedError {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedCount, len(scanners))
+				assert.Equal(t, tt.expectedInvalidCount, len(invalidScanners))
 
 				// Check scanner names
 				var scannerNames []string
@@ -295,6 +315,11 @@ func TestGetScanners(t *testing.T) {
 
 				for _, expectedName := range tt.expectedNames {
 					assert.Contains(t, scannerNames, expectedName)
+				}
+
+				// Check invalid scanner names
+				for _, expectedInvalidName := range tt.expectedInvalidNames {
+					assert.Contains(t, invalidScanners, expectedInvalidName)
 				}
 			}
 		})
@@ -734,10 +759,43 @@ func TestRunScan(t *testing.T) {
 	defer safeUnpatch(validateRegionsPatch)
 
 	// Patch the getScanners function
-	getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerNames string) ([]awsinternal.Scanner, error) {
+	getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerNames string) ([]awsinternal.Scanner, []string, error) {
+		var scanners []awsinternal.Scanner
+		var invalidScanners []string
+
 		if scannerNames == "invalid-scanner" {
-			return nil, fmt.Errorf("scanner invalid-scanner not found")
+			invalidScanners = append(invalidScanners, "invalid-scanner")
+			return scanners, invalidScanners, nil
 		}
+		
+		if scannerNames == "scanner1,invalid-scanner" {
+			scanners = append(scanners, &testScanner{
+				name:         "Scanner 1",
+				argumentName: "scanner1",
+				label:        "Test Scanner",
+				scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {
+					return awsinternal.ScanResults{
+						{
+							ResourceType: "TestResource",
+							ResourceID:   "test-resource-id",
+							AccountID:    opts.AccountID,
+							ResourceName: "Test Resource",
+							Reason:       "Test reason",
+							Tags: map[string]string{
+								"Environment": "Test",
+							},
+							Details: map[string]interface{}{
+								"Region": "us-west-2",
+							},
+							Cost: map[string]interface{}{"monthly": 10.0},
+						},
+					}, nil
+				},
+			})
+			invalidScanners = append(invalidScanners, "invalid-scanner")
+			return scanners, invalidScanners, nil
+		}
+
 		return []awsinternal.Scanner{
 			&testScanner{
 				name:         "Scanner 1",
@@ -762,7 +820,7 @@ func TestRunScan(t *testing.T) {
 					}, nil
 				},
 			},
-		}, nil
+		}, nil, nil
 	})
 	require.NoError(t, err)
 	defer safeUnpatch(getScannersPatch)
@@ -819,7 +877,7 @@ func TestRunScan(t *testing.T) {
 		
 		// For the invalid scanner test
 		if opts.scanners == "invalid-scanner" {
-			return fmt.Errorf("scanner invalid-scanner not found")
+			return fmt.Errorf("no valid scanners found and invalid scanners specified: invalid-scanner")
 		}
 		
 		return nil
@@ -833,6 +891,7 @@ func TestRunScan(t *testing.T) {
 		opts       *scanOptions
 		setupMocks func()
 		expectErr  bool
+		wantOutput string
 	}{
 		{
 			name: "basic scan - defaults",
@@ -1025,6 +1084,106 @@ func TestRunScan(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			name: "no valid scanners and at least one invalid scanner",
+			opts: &scanOptions{
+				regions:          "us-west-2",
+				scanners:         "invalid-scanner",
+				output:           "filesystem",
+				outputFormat:     "json",
+				organizationRole: "",
+				scannerRole:      "",
+			},
+			setupMocks: func() {
+				// Setup mocks for STS and Organizations
+				mockSTS.ExpectedCalls = nil
+				mockOrg.ExpectedCalls = nil
+
+				mockSTS.On("GetCallerIdentity", &sts.GetCallerIdentityInput{}).Return(
+					&sts.GetCallerIdentityOutput{
+						Account: aws.String("123456789012"),
+						Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					}, nil)
+
+				expiration := time.Now().Add(time.Hour)
+				mockSTS.On("AssumeRole", mock.Anything).Return(
+					&sts.AssumeRoleOutput{
+						Credentials: &sts.Credentials{
+							AccessKeyId:     aws.String("mock-access-key"),
+							SecretAccessKey: aws.String("mock-secret-key"),
+							SessionToken:    aws.String("mock-session-token"),
+							Expiration:      &expiration,
+						},
+					}, nil)
+
+				mockOrg.On("ListAccounts", mock.Anything).Return(
+					&organizations.ListAccountsOutput{
+						Accounts: []*organizations.Account{
+							{
+								Id:     aws.String("123456789012"),
+								Name:   aws.String("TestAccount"),
+								Status: aws.String("ACTIVE"),
+							},
+							{
+								Id:     aws.String("210987654321"),
+								Name:   aws.String("TestAccount2"),
+								Status: aws.String("ACTIVE"),
+							},
+						},
+					}, nil)
+			},
+			expectErr: true,
+		},
+		{
+			name: "mixed valid and invalid scanners",
+			opts: &scanOptions{
+				regions:          "us-west-2",
+				scanners:         "scanner1,invalid-scanner",
+				output:           "filesystem",
+				outputFormat:     "json",
+				organizationRole: "",
+				scannerRole:      "",
+			},
+			setupMocks: func() {
+				// Setup mocks for STS and Organizations
+				mockSTS.ExpectedCalls = nil
+				mockOrg.ExpectedCalls = nil
+
+				mockSTS.On("GetCallerIdentity", &sts.GetCallerIdentityInput{}).Return(
+					&sts.GetCallerIdentityOutput{
+						Account: aws.String("123456789012"),
+						Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					}, nil)
+
+				expiration := time.Now().Add(time.Hour)
+				mockSTS.On("AssumeRole", mock.Anything).Return(
+					&sts.AssumeRoleOutput{
+						Credentials: &sts.Credentials{
+							AccessKeyId:     aws.String("mock-access-key"),
+							SecretAccessKey: aws.String("mock-secret-key"),
+							SessionToken:    aws.String("mock-session-token"),
+							Expiration:      &expiration,
+						},
+					}, nil)
+
+				mockOrg.On("ListAccounts", mock.Anything).Return(
+					&organizations.ListAccountsOutput{
+						Accounts: []*organizations.Account{
+							{
+								Id:     aws.String("123456789012"),
+								Name:   aws.String("TestAccount"),
+								Status: aws.String("ACTIVE"),
+							},
+							{
+								Id:     aws.String("210987654321"),
+								Name:   aws.String("TestAccount2"),
+								Status: aws.String("ACTIVE"),
+							},
+						},
+					}, nil)
+			},
+			expectErr: false, // This should not error because there is a valid scanner
+		},
 	}
 
 	for _, tt := range tests {
@@ -1097,7 +1256,7 @@ func TestScanIntegration(t *testing.T) {
 				{
 					ResourceType: "TestResource",
 					ResourceID:   "test-resource-1",
-					AccountID:    "123456789012",
+					AccountID:    opts.AccountID,
 					AccountName:  "Test Account",
 					ResourceName: "Test Resource 1",
 					Reason:       "Unused for 100 days",
@@ -1155,84 +1314,105 @@ func TestScanIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer safeUnpatch(validateRegionsPatch)
 
-	// Patch runScan to avoid worker pool issues
+	// Patch runScan to handle the new getScanners return values
 	runScanPatch, err := mpatch.PatchMethod(runScan, func(cmd *cobra.Command, opts *scanOptions) error {
-		// Get scanners
-		scanners, _ := cmd.Flags().GetString("scanners")
-		if scanners == "invalid-scanner" {
-			_, err := cmd.OutOrStdout().Write([]byte("No scanners available, scan will be skipped\n"))
-			if err != nil {
-				return err
-			}
-		} else {
+		// Mock implementation for testing
+		scanners, invalidScanners, err := getScanners(opts.scanners)
+		if err != nil {
+			return err
+		}
+		
+		// Check if we need to exit immediately due to invalid scanners
+		if len(scanners) == 0 && len(invalidScanners) > 0 {
+			return fmt.Errorf("no valid scanners found and invalid scanners specified: %s", strings.Join(invalidScanners, ", "))
+		}
+		
+		// Write the result to the output
+		if opts.output == "filesystem" {
 			_, err := cmd.OutOrStdout().Write([]byte("ResourceType: TestResource\n"))
 			if err != nil {
 				return err
 			}
+		} else if opts.output == "s3" {
+			// Mock S3 output
+			_, err := cmd.OutOrStdout().Write([]byte("Writing to S3...\n"))
+			if err != nil {
+				return err
+			}
 		}
+		
 		return nil
 	})
 	require.NoError(t, err)
 	defer safeUnpatch(runScanPatch)
 
-	// Patch getScanners
-	getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerNames string) ([]awsinternal.Scanner, error) {
+	// Patch the getScanners function
+	getScannersPatch, err := mpatch.PatchMethod(getScanners, func(scannerNames string) ([]awsinternal.Scanner, []string, error) {
+		var scanners []awsinternal.Scanner
+		var invalidScanners []string
+
 		if scannerNames == "invalid-scanner" {
-			return nil, fmt.Errorf("scanner invalid-scanner not found")
+			invalidScanners = append(invalidScanners, "invalid-scanner")
+			return scanners, invalidScanners, nil
 		}
-		return []awsinternal.Scanner{
-			&testScanner{
-				name:         "scanner1",
-				argumentName: "scanner1",
-				label:        "Test Scanner",
+
+		scanners = append(scanners, &testScanner{
+			name:         "Scanner 1",
+			argumentName: "scanner1",
+			label:        "Test Scanner",
+			scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {
+				return awsinternal.ScanResults{
+					{
+						ResourceType: "TestResource",
+						ResourceID:   "test-resource-id",
+						AccountID:    opts.AccountID,
+						ResourceName: "Test Resource",
+						Reason:       "Test reason",
+						Tags: map[string]string{
+							"Environment": "Test",
+						},
+						Details: map[string]interface{}{
+							"Region": "us-west-2",
+						},
+						Cost: map[string]interface{}{"monthly": 10.0},
+					},
+				}, nil
 			},
-		}, nil
+		})
+
+		return scanners, nil, nil
 	})
 	require.NoError(t, err)
 	defer safeUnpatch(getScannersPatch)
 
 	tests := []struct {
-		name       string
-		args       []string
-		setupMocks func()
-		wantErr    bool
-		wantOutput string
+		name           string
+		args           []string
+		expectedOutput string
+		expectError    bool
 	}{
 		{
-			name: "basic scan",
-			args: []string{"--regions", "us-west-2"},
-			setupMocks: func() {
-				// No setup needed, using default mocks
-			},
-			wantErr:    false,
-			wantOutput: "ResourceType",
+			name:           "basic scan",
+			args:           []string{"--scanners", "scanner1"},
+			expectedOutput: "ResourceType: TestResource",
+			expectError:    false,
 		},
 		{
-			name: "invalid scanner",
-			args: []string{"--scanners", "invalid-scanner"},
-			setupMocks: func() {
-				// No setup needed, using default mocks
-			},
-			wantErr:    false,
-			wantOutput: "No scanners available, scan will be skipped",
+			name:           "invalid scanner",
+			args:           []string{"--scanners", "invalid-scanner"},
+			expectedOutput: "no valid scanners found and invalid scanners specified: invalid-scanner",
+			expectError:    true,
 		},
 		{
-			name: "no regions specified",
-			args: []string{},
-			setupMocks: func() {
-				// No setup needed, using default mocks
-			},
-			wantErr:    false,
-			wantOutput: "ResourceType",
+			name:           "no regions specified",
+			args:           []string{"--regions", ""},
+			expectedOutput: "ResourceType: TestResource",
+			expectError:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setupMocks != nil {
-				tt.setupMocks()
-			}
-
 			// Create a buffer to capture output
 			buf := &bytes.Buffer{}
 			rootCmd := &cobra.Command{Use: "root"}
@@ -1245,15 +1425,15 @@ func TestScanIntegration(t *testing.T) {
 			rootCmd.SetArgs(append([]string{"scan"}, tt.args...))
 			err := rootCmd.Execute()
 
-			if tt.wantErr {
+			if tt.expectError {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
 
 			output := buf.String()
-			if tt.wantOutput != "" {
-				assert.Contains(t, output, tt.wantOutput)
+			if tt.expectedOutput != "" {
+				assert.Contains(t, output, tt.expectedOutput)
 			}
 		})
 	}
