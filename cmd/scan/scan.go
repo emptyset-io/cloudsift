@@ -279,25 +279,26 @@ func isIAMScanner(scanner awsinternal.Scanner) bool {
 	return scanner.Label() == "IAM Roles" || scanner.Label() == "IAM Users"
 }
 
-func getScanners(scannerList string) ([]awsinternal.Scanner, error) {
+func getScanners(scannerList string) ([]awsinternal.Scanner, []string, error) {
 	var scanners []awsinternal.Scanner
+	var invalidScanners []string
 
 	// If no scanners specified, get all available scanners
 	if scannerList == "" {
 		// If no scanners specified, get all available scanners
 		names := awsinternal.DefaultRegistry.ListScanners()
 		if len(names) == 0 {
-			return nil, fmt.Errorf("no scanners available in registry")
+			return nil, nil, fmt.Errorf("no scanners available in registry")
 		}
 
 		for _, name := range names {
 			scanner, err := awsinternal.DefaultRegistry.GetScanner(name)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
+				return nil, nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
 			}
 			scanners = append(scanners, scanner)
 		}
-		return scanners, nil
+		return scanners, invalidScanners, nil
 	}
 
 	// Parse comma-separated list of scanners
@@ -305,12 +306,14 @@ func getScanners(scannerList string) ([]awsinternal.Scanner, error) {
 	for _, name := range names {
 		scanner, err := awsinternal.DefaultRegistry.GetScanner(name)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get scanner '%s': %w", name, err)
+			// Track invalid scanner but continue processing
+			invalidScanners = append(invalidScanners, name)
+			continue
 		}
 		scanners = append(scanners, scanner)
 	}
 
-	return scanners, nil
+	return scanners, invalidScanners, nil
 }
 
 func runScan(cmd *cobra.Command, opts *scanOptions) error {
@@ -325,7 +328,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	// Get and validate scanners
-	scanners, err := getScanners(opts.scanners)
+	scanners, invalidScanners, err := getScanners(opts.scanners)
 	if err != nil {
 		logging.Error("Failed to get scanners", err, map[string]interface{}{
 			"scanners": opts.scanners,
@@ -333,7 +336,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		scanners = []awsinternal.Scanner{} // Continue with empty scanner list
 	}
 
+	if len(invalidScanners) > 0 {
+		logging.Warn("Invalid scanners specified", map[string]interface{}{
+			"invalid_scanners": invalidScanners,
+		})
+	}
+
 	if len(scanners) == 0 {
+		if len(invalidScanners) > 0 {
+			// Exit immediately if no valid scanners and at least one invalid scanner
+			return fmt.Errorf("no valid scanners found and invalid scanners specified: %s", strings.Join(invalidScanners, ", "))
+		}
 		logging.Warn("No scanners available, scan will be skipped", nil)
 	}
 

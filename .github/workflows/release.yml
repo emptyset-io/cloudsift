@@ -65,6 +65,28 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1)
+          echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+          
+          # Generate real changelog with commit links
+          echo "Generating changelog with links..."
+          
+          # Create changelog with links to commits and PRs
+          REPO_URL="https://github.com/${{ github.repository }}"
+          
+          # Get the changelog entries with commit links and ensure newlines
+          rm -f changelog.txt
+          git log --pretty=format:"• <${REPO_URL}/commit/%h|%h> %s (%an)" ${PREVIOUS_TAG}..HEAD | while read -r line; do
+            echo "$line" >> changelog.txt
+            echo "" >> changelog.txt  # Add an empty line after each entry
+          done
+          
+          echo "Changelog content:"
+          cat changelog.txt
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -75,57 +97,86 @@ jobs:
             emptyset/cloudsift:latest
             emptyset/cloudsift:${{ steps.get_version.outputs.version }}
 
-      - name: Post to Slack
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "New Release: ${{ steps.get_version.outputs.version }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "🚀 New Release: ${{ steps.get_version.outputs.version }}"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*CloudSift ${{ steps.get_version.outputs.version }} has been released!*\n\nRelease type: `${{ github.event.inputs.release_type }}`"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "📦 Docker images published:\n• `emptyset/cloudsift:latest`\n• `emptyset/cloudsift:${{ steps.get_version.outputs.version }}`"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Release"
-                      },
-                      "url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.version }}"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Workflow"
-                      },
-                      "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
+      - name: Create Slack Payload and Send
+        id: slack
+        run: |
+          # Format the changelog with proper newlines for Slack
+          CHANGELOG=""
+          while IFS= read -r line; do
+            # Skip empty lines at the end
+            if [[ -n "$line" ]]; then
+              CHANGELOG="${CHANGELOG}${line}\n"
+            fi
+          done < changelog.txt
+          
+          # Create payload with changelog that includes links
+          cat > payload.json << EOF
+          {
+            "text": "CloudSift ${{ steps.get_version.outputs.version }} has been released!",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🚀 New Release: ${{ steps.get_version.outputs.version }}",
+                  "emoji": true
                 }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*CloudSift ${{ steps.get_version.outputs.version }} has been released!*\n\nRelease type: \`${{ github.event.inputs.release_type }}\`"
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "📦 Docker images published:\n• \`emptyset/cloudsift:latest\`\n• \`emptyset/cloudsift:${{ steps.get_version.outputs.version }}\`"
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "📝 *Changes since ${{ steps.changelog.outputs.previous_tag }}:*\n${CHANGELOG}"
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "View Release",
+                      "emoji": true
+                    },
+                    "url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.version }}"
+                  },
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "View Workflow",
+                      "emoji": true
+                    },
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          
+          echo "Generated payload:"
+          cat payload.json
+          
+          # Send using curl
+          RESPONSE=$(curl -s -X POST -H "Content-type: application/json" -d @payload.json ${{ secrets.SLACK_WEBHOOK_URL }})
+          echo "Slack API response: $RESPONSE"
+          
+      - name: Output Slack result
+        if: always()
+        run: echo "Slack API response completed"
