@@ -41,32 +41,32 @@ func NewScannerRegistry() *ScannerRegistry {
 func (r *ScannerRegistry) RegisterScanner(scanner Scanner) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.scanners[scanner.Name()] = scanner
+	r.scanners[scanner.ArgumentName()] = scanner
 }
 
-// GetScanner retrieves a scanner by name
-func (r *ScannerRegistry) GetScanner(name string) (Scanner, error) {
+// GetScanner retrieves a scanner by argument name
+func (r *ScannerRegistry) GetScanner(argumentName string) (Scanner, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	scanner, ok := r.scanners[name]
+	scanner, ok := r.scanners[argumentName]
 	if !ok {
-		return nil, fmt.Errorf("scanner %s not found", name)
+		return nil, fmt.Errorf("scanner %s not found", argumentName)
 	}
 	return scanner, nil
 }
 
-// ListScanners returns a sorted list of registered scanner names
+// ListScanners returns a sorted list of registered scanner argument names
 func (r *ScannerRegistry) ListScanners() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var names []string
-	for name := range r.scanners {
-		names = append(names, name)
+	var argumentNames []string
+	for argumentName := range r.scanners {
+		argumentNames = append(argumentNames, argumentName)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(argumentNames)
+	return argumentNames
 }
 
 // DefaultRegistry is the default scanner registry
