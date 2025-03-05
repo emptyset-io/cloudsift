@@ -70,16 +70,6 @@ build: deps
 	@$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
-.PHONY: build-all
-build-all:
-	@echo "Building for all platforms..."
-	@mkdir -p $(BUILD_DIR)
-	@GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64
-	@GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
-	@GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
-	@GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
-	@echo "Cross-platform build complete."
-
 .PHONY: clean
 clean:
 	@echo "Cleaning..."
@@ -158,8 +148,6 @@ release: validate-release-type pre-release-checks lint test
 	@echo "Starting release process..."
 	@echo "Running tests and checks..."
 	$(MAKE) version-bump-$(RELEASE_TYPE)
-	@echo "Building and verifying..."
-	$(MAKE) build-all
 	@echo "Pushing changes..."
 	git push
 	git push --tags
