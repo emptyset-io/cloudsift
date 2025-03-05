@@ -1,8 +1,9 @@
 /bin/
 /vendor/
 /scripts/*
-/output/
-/cache/
-/reports/
+output
+cache
+reports
+testdata
 sample_scan_data.json
 /dist/

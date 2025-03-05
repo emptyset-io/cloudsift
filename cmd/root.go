@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"runtime"
 	"strings"
 
 	initCmd "cloudsift/cmd/init"
@@ -27,20 +26,9 @@ It provides a simple interface for common AWS tasks and operations.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip config initialization for certain commands
 			if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "completion" {
+				// Reset config to empty values for these commands
+				config.Config = &config.GlobalConfig{}
 				return nil
-			}
-
-			// Check if we should enable logging
-			shouldLog := false
-			if cmd.Name() == "scan" || cmd.Name() == "list" || (cmd.Parent() != nil && (cmd.Parent().Name() == "scan" || cmd.Parent().Name() == "list")) {
-				shouldLog = true
-			}
-
-			// Set config file if specified
-			if configFile != "" {
-				if err := config.SetConfigFile(configFile); err != nil {
-					return err
-				}
 			}
 
 			// First bind global flags to viper
@@ -63,9 +51,22 @@ It provides a simple interface for common AWS tasks and operations.`,
 				return err
 			}
 
-			// Then initialize config to set defaults
-			if err := config.InitConfig(shouldLog, cmd); err != nil {
+			// Set config file if specified
+			if configFile != "" {
+				if err := config.SetConfigFile(configFile); err != nil {
+					return err
+				}
+			}
+
+			// Initialize config to read from file
+			if err := config.InitConfig(false, cmd); err != nil {
 				return err
+			}
+
+			// Check if we should enable logging
+			shouldLog := false
+			if cmd.Name() == "scan" || cmd.Name() == "list" || (cmd.Parent() != nil && (cmd.Parent().Name() == "scan" || cmd.Parent().Name() == "list")) {
+				shouldLog = true
 			}
 
 			// Update config struct with values from viper
@@ -115,7 +116,7 @@ It provides a simple interface for common AWS tasks and operations.`,
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Path to config file")
 	rootCmd.PersistentFlags().StringVar(&config.Config.LogFormat, "log-format", "text", "Log output format (text or json)")
 	rootCmd.PersistentFlags().StringVar(&config.Config.LogLevel, "log-level", "INFO", "Set logging level (DEBUG, INFO, WARN, ERROR)")
-	rootCmd.PersistentFlags().IntVar(&config.Config.MaxWorkers, "max-workers", runtime.NumCPU()*8, "Maximum number of concurrent workers")
+	rootCmd.PersistentFlags().IntVar(&config.Config.MaxWorkers, "max-workers", 8, "Maximum number of concurrent workers")
 	rootCmd.PersistentFlags().StringVarP(&config.Config.Profile, "profile", "p", "default", "AWS profile to use (supports SSO profiles)")
 	rootCmd.PersistentFlags().StringVar(&config.Config.OrganizationRole, "organization-role", "", "Role name to assume for organization-wide operations")
 	rootCmd.PersistentFlags().StringVar(&config.Config.ScannerRole, "scanner-role", "", "Role name to assume for scanning operations")
