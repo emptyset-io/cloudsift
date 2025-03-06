@@ -21,7 +21,7 @@ func (nc *NATGatewayCalculator) CalculateCost(price float64) *models.CostBreakdo
 	if price == 0 {
 		price = defaultNATGatewayHourlyPrice
 	}
-	
+
 	// NAT Gateway pricing is already per hour, so we can use the base calculator
 	return nc.CalculateRates(price)
 }

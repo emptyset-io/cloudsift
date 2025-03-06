@@ -90,11 +90,11 @@ func (rl *RateLimiter) Wait(ctx context.Context) error {
 	if backoff > 0 {
 		// Temporary debug to check log level
 		logging.Info("TEMP: Rate limiter applying backoff", map[string]interface{}{
-			"backoff_ms":     backoff.Milliseconds(),
-			"failure_count":  rl.failureCount,
-			"last_failure":   rl.lastFailure.Format(time.RFC3339),
-			"base_delay_ms":  rl.baseDelay.Milliseconds(),
-			"max_delay_ms":   rl.maxDelay.Milliseconds(),
+			"backoff_ms":    backoff.Milliseconds(),
+			"failure_count": rl.failureCount,
+			"last_failure":  rl.lastFailure.Format(time.RFC3339),
+			"base_delay_ms": rl.baseDelay.Milliseconds(),
+			"max_delay_ms":  rl.maxDelay.Milliseconds(),
 		})
 		select {
 		case <-ctx.Done():
@@ -121,7 +121,7 @@ func (rl *RateLimiter) OnSuccess() {
 	if rl.failureCount > 0 {
 		logging.Debug("Rate limiter resetting backoff after success", map[string]interface{}{
 			"previous_failure_count": rl.failureCount,
-			"last_failure":          rl.lastFailure.Format(time.RFC3339),
+			"last_failure":           rl.lastFailure.Format(time.RFC3339),
 		})
 		rl.failureCount = 0
 		rl.lastFailure = time.Time{}
@@ -137,8 +137,8 @@ func (rl *RateLimiter) OnFailure() {
 	rl.lastFailure = time.Now()
 
 	logging.Debug("Rate limiter recorded failure", map[string]interface{}{
-		"failure_count":    rl.failureCount,
-		"last_failure":     rl.lastFailure.Format(time.RFC3339),
+		"failure_count":   rl.failureCount,
+		"last_failure":    rl.lastFailure.Format(time.RFC3339),
 		"next_backoff_ms": float64(rl.baseDelay) * math.Pow(2, float64(rl.failureCount-1)),
 	})
 }

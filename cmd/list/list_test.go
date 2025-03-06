@@ -22,25 +22,25 @@ import (
 func captureOutput(f func()) string {
 	// Save original stdout
 	oldStdout := os.Stdout
-	
+
 	// Create a pipe to capture stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	
+
 	// Call the function that produces output
 	f()
-	
+
 	// Close the writer and restore stdout
 	w.Close()
 	os.Stdout = oldStdout
-	
+
 	// Read the captured output
 	var buf bytes.Buffer
 	_, err := io.Copy(&buf, r)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error copying output: %v\n", err)
 	}
-	
+
 	return buf.String()
 }
 
@@ -48,30 +48,30 @@ func captureOutput(f func()) string {
 func executeCommand(cmd *cobra.Command, args ...string) (string, error) {
 	// Save original stdout
 	oldStdout := os.Stdout
-	
+
 	// Create a pipe to capture stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	
+
 	// Set up command
 	cmd.SetOut(w)
 	cmd.SetErr(w)
 	cmd.SetArgs(args)
-	
+
 	// Execute command
 	err := cmd.Execute()
-	
+
 	// Close the writer and restore stdout
 	w.Close()
 	os.Stdout = oldStdout
-	
+
 	// Read the captured output
 	var buf bytes.Buffer
 	_, copyErr := io.Copy(&buf, r)
 	if copyErr != nil {
 		fmt.Fprintf(os.Stderr, "Error copying output: %v\n", copyErr)
 	}
-	
+
 	return buf.String(), err
 }
 
@@ -235,26 +235,26 @@ func TestRunAccounts(t *testing.T) {
 
 			// Create command
 			cmd := NewAccountsCmd()
-			
+
 			if tt.name == "list organization accounts" {
 				err := cmd.Flags().Set("organization-role", "OrganizationRole")
 				require.NoError(t, err)
 			}
-			
+
 			// Capture output and execute command
 			var output string
 			var cmdErr error
-			
+
 			if tt.expectError {
 				cmdErr = runAccounts(cmd)
 				assert.Error(t, cmdErr)
 				return
 			}
-			
+
 			output = captureOutput(func() {
 				cmdErr = runAccounts(cmd)
 			})
-			
+
 			assert.NoError(t, cmdErr)
 			expectedOutput := strings.ReplaceAll(tt.expectedOutput, "\n", "\n")
 			output = strings.ReplaceAll(output, "\r\n", "\n")
@@ -314,17 +314,17 @@ func TestRunProfiles(t *testing.T) {
 			// Capture output and execute function
 			var output string
 			var cmdErr error
-			
+
 			if tt.expectError {
 				cmdErr = runProfiles()
 				assert.Error(t, cmdErr)
 				return
 			}
-			
+
 			output = captureOutput(func() {
 				cmdErr = runProfiles()
 			})
-			
+
 			assert.NoError(t, cmdErr)
 			expectedOutput := strings.ReplaceAll(tt.expectedOutput, "\n", "\n")
 			output = strings.ReplaceAll(output, "\r\n", "\n")
@@ -378,15 +378,15 @@ func TestRunScanners(t *testing.T) {
 
 			// Create command
 			cmd := NewScannersCmd()
-			
+
 			// Capture output and execute command
 			var output string
 			var cmdErr error
-			
+
 			output = captureOutput(func() {
 				cmdErr = cmd.RunE(cmd, nil)
 			})
-			
+
 			// Restore original registry
 			awspkg.DefaultRegistry = originalRegistry
 
@@ -456,7 +456,7 @@ func TestIntegration(t *testing.T) {
 			cmd := NewListCmd()
 			output, err := executeCommand(cmd, tc.args...)
 			require.NoError(t, err)
-			
+
 			expectedOutput := strings.ReplaceAll(tc.expectedOutput, "\n", "\n")
 			output = strings.ReplaceAll(output, "\r\n", "\n")
 			assert.Contains(t, output, expectedOutput)
