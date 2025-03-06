@@ -17,11 +17,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&SecurityGroupScanner{})
 }
 
-// Name implements Scanner interface
-func (s *SecurityGroupScanner) Name() string {
-	return "security-groups"
-}
-
 // ArgumentName implements Scanner interface
 func (s *SecurityGroupScanner) ArgumentName() string {
 	return "security-groups"

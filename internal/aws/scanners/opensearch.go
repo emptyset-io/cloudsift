@@ -21,11 +21,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&OpenSearchScanner{})
 }
 
-// Name implements Scanner interface
-func (s *OpenSearchScanner) Name() string {
-	return "opensearch"
-}
-
 // ArgumentName implements Scanner interface
 func (s *OpenSearchScanner) ArgumentName() string {
 	return "opensearch"

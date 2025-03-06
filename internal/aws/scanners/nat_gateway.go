@@ -20,11 +20,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&NATGatewayScanner{})
 }
 
-// Name implements Scanner interface
-func (s *NATGatewayScanner) Name() string {
-	return "nat_gateways"
-}
-
 // ArgumentName implements Scanner interface
 func (s *NATGatewayScanner) ArgumentName() string {
 	return "nat-gateways"
@@ -110,7 +105,7 @@ func (s *NATGatewayScanner) analyzeNATGatewayUsage(cwClient *cloudwatch.CloudWat
 func (s *NATGatewayScanner) calculateNATGatewayCost(natGateway *ec2.NatGateway, region string) (*awslib.CostBreakdown, error) {
 	// Get creation time
 	creationTime := aws.TimeValue(natGateway.CreateTime)
-	
+
 	// NAT Gateways have a flat hourly rate based on region
 	config := awslib.ResourceCostConfig{
 		ResourceType: "NATGateway",
@@ -123,9 +118,9 @@ func (s *NATGatewayScanner) calculateNATGatewayCost(natGateway *ec2.NatGateway, 
 		// Only use hardcoded values if the cost estimator is not available
 		hoursRunning := time.Since(creationTime).Hours()
 		hourlyRate := 0.045 // Default hourly rate if cost estimator is not available
-		
+
 		lifetime := hourlyRate * hoursRunning
-		
+
 		return &awslib.CostBreakdown{
 			HourlyRate:   hourlyRate,
 			DailyRate:    hourlyRate * 24,
@@ -141,9 +136,9 @@ func (s *NATGatewayScanner) calculateNATGatewayCost(natGateway *ec2.NatGateway, 
 		// Fallback to default pricing if cost estimator fails or returns zero
 		hoursRunning := time.Since(creationTime).Hours()
 		hourlyRate := 0.045 // Default hourly rate as fallback
-		
+
 		lifetime := hourlyRate * hoursRunning
-		
+
 		return &awslib.CostBreakdown{
 			HourlyRate:   hourlyRate,
 			DailyRate:    hourlyRate * 24,
@@ -153,7 +148,7 @@ func (s *NATGatewayScanner) calculateNATGatewayCost(natGateway *ec2.NatGateway, 
 			Lifetime:     aws.Float64(lifetime),
 		}, nil
 	}
-	
+
 	return costBreakdown, nil
 }
 
@@ -226,13 +221,13 @@ func (s *NATGatewayScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				logging.Error("Failed to calculate NAT Gateway cost", err, map[string]interface{}{
 					"nat_gateway_id": natGatewayID,
 				})
-				
+
 				// Get creation time for fallback calculation
 				creationTime := aws.TimeValue(natGateway.CreateTime)
 				hoursRunning := time.Since(creationTime).Hours()
 				hourlyRate := 0.045 // Default hourly rate as fallback
 				lifetime := hourlyRate * hoursRunning
-				
+
 				cost = &awslib.CostBreakdown{
 					HourlyRate:   hourlyRate,
 					DailyRate:    hourlyRate * 24,
@@ -265,14 +260,14 @@ func (s *NATGatewayScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, e
 				ResourceID:   natGatewayID,
 				Reason:       reason,
 				Details: map[string]interface{}{
-					"account_id":     opts.AccountID,
-					"region":         opts.Region,
-					"state":          aws.StringValue(natGateway.State),
-					"vpc_id":         aws.StringValue(natGateway.VpcId),
-					"subnet_id":      aws.StringValue(natGateway.SubnetId),
-					"creation_time":  creationTime,
-					"hours_running":  hoursRunning,
-					"days_unused":    daysUnused,
+					"account_id":    opts.AccountID,
+					"region":        opts.Region,
+					"state":         aws.StringValue(natGateway.State),
+					"vpc_id":        aws.StringValue(natGateway.VpcId),
+					"subnet_id":     aws.StringValue(natGateway.SubnetId),
+					"creation_time": creationTime,
+					"hours_running": hoursRunning,
+					"days_unused":   daysUnused,
 				},
 				Tags: tags,
 				Cost: costDetails,

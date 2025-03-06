@@ -21,11 +21,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&RDSScanner{})
 }
 
-// Name implements Scanner interface
-func (s *RDSScanner) Name() string {
-	return "rds"
-}
-
 // ArgumentName implements Scanner interface
 func (s *RDSScanner) ArgumentName() string {
 	return "rds"

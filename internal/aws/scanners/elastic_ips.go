@@ -18,11 +18,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&ElasticIPScanner{})
 }
 
-// Name implements Scanner interface
-func (s *ElasticIPScanner) Name() string {
-	return "elastic-ips"
-}
-
 // ArgumentName implements Scanner interface
 func (s *ElasticIPScanner) ArgumentName() string {
 	return "elastic-ips"

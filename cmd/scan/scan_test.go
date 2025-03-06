@@ -71,14 +71,9 @@ func (m *mockOrganizationsAPI) ListAccounts(input *organizations.ListAccountsInp
 
 // Test scanner implementation
 type testScanner struct {
-	name         string
 	argumentName string
 	label        string
 	scanFunc     func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error)
-}
-
-func (s *testScanner) Name() string {
-	return s.name
 }
 
 func (s *testScanner) ArgumentName() string {
@@ -182,12 +177,10 @@ func TestGetScanners(t *testing.T) {
 
 	// Register test scanners
 	scanner1 := &testScanner{
-		name:         "scanner1",
 		argumentName: "scanner1",
 		label:        "Scanner 1",
 	}
 	scanner2 := &testScanner{
-		name:         "scanner2",
 		argumentName: "scanner2",
 		label:        "Scanner 2",
 	}
@@ -197,56 +190,56 @@ func TestGetScanners(t *testing.T) {
 
 	// Test cases
 	tests := []struct {
-		name                string
-		scannerList         string
-		expectedCount       int
-		expectedError       bool
-		expectedNames       []string
+		name                 string
+		scannerList          string
+		expectedCount        int
+		expectedError        bool
+		expectedNames        []string
 		expectedInvalidCount int
 		expectedInvalidNames []string
 	}{
 		{
-			name:                "all scanners",
-			scannerList:         "",
-			expectedCount:       2,
-			expectedError:       false,
-			expectedNames:       []string{"scanner1", "scanner2"},
+			name:                 "all scanners",
+			scannerList:          "",
+			expectedCount:        2,
+			expectedError:        false,
+			expectedNames:        []string{"scanner1", "scanner2"},
 			expectedInvalidCount: 0,
 			expectedInvalidNames: []string{},
 		},
 		{
-			name:                "specific scanner",
-			scannerList:         "scanner1",
-			expectedCount:       1,
-			expectedError:       false,
-			expectedNames:       []string{"scanner1"},
+			name:                 "specific scanner",
+			scannerList:          "scanner1",
+			expectedCount:        1,
+			expectedError:        false,
+			expectedNames:        []string{"scanner1"},
 			expectedInvalidCount: 0,
 			expectedInvalidNames: []string{},
 		},
 		{
-			name:                "multiple scanners",
-			scannerList:         "scanner1,scanner2",
-			expectedCount:       2,
-			expectedError:       false,
-			expectedNames:       []string{"scanner1", "scanner2"},
+			name:                 "multiple scanners",
+			scannerList:          "scanner1,scanner2",
+			expectedCount:        2,
+			expectedError:        false,
+			expectedNames:        []string{"scanner1", "scanner2"},
 			expectedInvalidCount: 0,
 			expectedInvalidNames: []string{},
 		},
 		{
-			name:                "invalid scanner",
-			scannerList:         "invalid-scanner",
-			expectedCount:       0,
-			expectedError:       false,
-			expectedNames:       []string{},
+			name:                 "invalid scanner",
+			scannerList:          "invalid-scanner",
+			expectedCount:        0,
+			expectedError:        false,
+			expectedNames:        []string{},
 			expectedInvalidCount: 1,
 			expectedInvalidNames: []string{"invalid-scanner"},
 		},
 		{
-			name:                "mixed valid and invalid",
-			scannerList:         "scanner1,invalid-scanner",
-			expectedCount:       1,
-			expectedError:       false,
-			expectedNames:       []string{"scanner1"},
+			name:                 "mixed valid and invalid",
+			scannerList:          "scanner1,invalid-scanner",
+			expectedCount:        1,
+			expectedError:        false,
+			expectedNames:        []string{"scanner1"},
 			expectedInvalidCount: 1,
 			expectedInvalidNames: []string{"invalid-scanner"},
 		},
@@ -267,7 +260,7 @@ func TestGetScanners(t *testing.T) {
 
 				// For mixed valid and invalid, return only valid scanners and track invalid ones
 				if scannerList == "scanner1,invalid-scanner" {
-					scanners = append(scanners, &testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"})
+					scanners = append(scanners, &testScanner{argumentName: "scanner1", label: "Scanner 1"})
 					invalidScanners = append(invalidScanners, "invalid-scanner")
 					return scanners, invalidScanners, nil
 				}
@@ -276,23 +269,24 @@ func TestGetScanners(t *testing.T) {
 				if scannerList == "" {
 					// All scanners
 					return []awsinternal.Scanner{
-						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
-						&testScanner{name: "scanner2", argumentName: "scanner2", label: "Scanner 2"},
+						&testScanner{argumentName: "scanner1", label: "Scanner 1"},
+						&testScanner{argumentName: "scanner2", label: "Scanner 2"},
 					}, invalidScanners, nil
 				} else if scannerList == "scanner1" {
 					return []awsinternal.Scanner{
-						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
+						&testScanner{argumentName: "scanner1", label: "Scanner 1"},
 					}, invalidScanners, nil
 				} else if scannerList == "scanner1,scanner2" {
 					return []awsinternal.Scanner{
-						&testScanner{name: "scanner1", argumentName: "scanner1", label: "Scanner 1"},
-						&testScanner{name: "scanner2", argumentName: "scanner2", label: "Scanner 2"},
+						&testScanner{argumentName: "scanner1", label: "Scanner 1"},
+						&testScanner{argumentName: "scanner2", label: "Scanner 2"},
 					}, invalidScanners, nil
 				}
 
 				// Default case
 				return []awsinternal.Scanner{
-					&testScanner{name: "Scanner 1", argumentName: "scanner1", label: "Test Scanner"},
+					&testScanner{argumentName: "scanner1", label: "Scanner 1"},
+					&testScanner{argumentName: "scanner2", label: "Scanner 2"},
 				}, invalidScanners, nil
 			})
 			require.NoError(t, err)
@@ -308,13 +302,13 @@ func TestGetScanners(t *testing.T) {
 				assert.Equal(t, tt.expectedInvalidCount, len(invalidScanners))
 
 				// Check scanner names
-				var scannerNames []string
+				var scannerArgumentNames []string
 				for _, s := range scanners {
-					scannerNames = append(scannerNames, s.Name())
+					scannerArgumentNames = append(scannerArgumentNames, s.ArgumentName())
 				}
 
 				for _, expectedName := range tt.expectedNames {
-					assert.Contains(t, scannerNames, expectedName)
+					assert.Contains(t, scannerArgumentNames, expectedName)
 				}
 
 				// Check invalid scanner names
@@ -676,7 +670,7 @@ func TestRunScan(t *testing.T) {
 		Use:   "scan",
 		Short: "Scan AWS resources",
 	}
-	
+
 	// Add flags to the command
 	cmd.Flags().String("regions", "", "AWS regions to scan")
 	cmd.Flags().String("scanners", "", "Scanners to use")
@@ -767,10 +761,9 @@ func TestRunScan(t *testing.T) {
 			invalidScanners = append(invalidScanners, "invalid-scanner")
 			return scanners, invalidScanners, nil
 		}
-		
+
 		if scannerNames == "scanner1,invalid-scanner" {
 			scanners = append(scanners, &testScanner{
-				name:         "Scanner 1",
 				argumentName: "scanner1",
 				label:        "Test Scanner",
 				scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {
@@ -798,7 +791,6 @@ func TestRunScan(t *testing.T) {
 
 		return []awsinternal.Scanner{
 			&testScanner{
-				name:         "Scanner 1",
 				argumentName: "scanner1",
 				label:        "Test Scanner",
 				scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {
@@ -874,12 +866,12 @@ func TestRunScan(t *testing.T) {
 		if opts.output == "s3" && opts.bucket == "error-bucket" {
 			return fmt.Errorf("S3 bucket access validation failed")
 		}
-		
+
 		// For the invalid scanner test
 		if opts.scanners == "invalid-scanner" {
 			return fmt.Errorf("no valid scanners found and invalid scanners specified: invalid-scanner")
 		}
-		
+
 		return nil
 	})
 	require.NoError(t, err)
@@ -1248,7 +1240,6 @@ func TestScanIntegration(t *testing.T) {
 
 	// Register test scanners
 	scanner1 := &testScanner{
-		name:         "scanner1",
 		argumentName: "scanner1",
 		label:        "Scanner 1",
 		scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {
@@ -1321,12 +1312,12 @@ func TestScanIntegration(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		
+
 		// Check if we need to exit immediately due to invalid scanners
 		if len(scanners) == 0 && len(invalidScanners) > 0 {
 			return fmt.Errorf("no valid scanners found and invalid scanners specified: %s", strings.Join(invalidScanners, ", "))
 		}
-		
+
 		// Write the result to the output
 		if opts.output == "filesystem" {
 			_, err := cmd.OutOrStdout().Write([]byte("ResourceType: TestResource\n"))
@@ -1340,7 +1331,7 @@ func TestScanIntegration(t *testing.T) {
 				return err
 			}
 		}
-		
+
 		return nil
 	})
 	require.NoError(t, err)
@@ -1357,7 +1348,6 @@ func TestScanIntegration(t *testing.T) {
 		}
 
 		scanners = append(scanners, &testScanner{
-			name:         "Scanner 1",
 			argumentName: "scanner1",
 			label:        "Test Scanner",
 			scanFunc: func(opts awsinternal.ScanOptions) (awsinternal.ScanResults, error) {

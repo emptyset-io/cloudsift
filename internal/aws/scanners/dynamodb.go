@@ -21,11 +21,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&DynamoDBScanner{})
 }
 
-// Name implements Scanner interface
-func (s *DynamoDBScanner) Name() string {
-	return "dynamodb"
-}
-
 // ArgumentName implements Scanner interface
 func (s *DynamoDBScanner) ArgumentName() string {
 	return "dynamodb"

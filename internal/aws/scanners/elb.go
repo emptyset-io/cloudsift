@@ -27,11 +27,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&ELBScanner{})
 }
 
-// Name implements Scanner interface
-func (s *ELBScanner) Name() string {
-	return "elb"
-}
-
 // ArgumentName implements Scanner interface
 func (s *ELBScanner) ArgumentName() string {
 	return "load-balancers"
