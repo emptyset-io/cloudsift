@@ -113,6 +113,8 @@ jobs:
           tags: |
             emptyset/cloudsift:latest
             emptyset/cloudsift:${{ steps.get_version.outputs.version }}
+          cache-from: type=local,src=cache
+          cache-to: type=local,dest=cache
 
       - name: Create Slack Payload and Send
         id: slack
