@@ -19,7 +19,7 @@ var (
 // String returns the full version string
 func String() string {
 	if GitCommit != "" && BuildTime != "" {
-		return fmt.Sprintf("%s (commit: %s built: %s with: %s)", 
+		return fmt.Sprintf("%s (commit: %s built: %s with: %s)",
 			Version, GitCommit[:8], BuildTime, GoVersion)
 	}
 	return Version

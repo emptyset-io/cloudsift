@@ -25,19 +25,19 @@ func getParameterSource(key string, cmd *cobra.Command) parameterSource {
 
 	// Map config keys to flag names
 	flagNames := map[string]string{
-		"aws.profile":          "profile",
+		"aws.profile":           "profile",
 		"aws.organization_role": "organization-role",
-		"aws.scanner_role":     "scanner-role",
-		"app.max_workers":      "max-workers",
-		"app.log_format":       "log-format",
-		"app.log_level":        "log-level",
-		"scan.regions":         "regions",
-		"scan.scanners":        "scanners",
-		"scan.output":          "output",
-		"scan.output_format":   "output-format",
-		"scan.bucket":          "bucket",
-		"scan.bucket_region":   "bucket-region",
-		"scan.days_unused":     "days-unused",
+		"aws.scanner_role":      "scanner-role",
+		"app.max_workers":       "max-workers",
+		"app.log_format":        "log-format",
+		"app.log_level":         "log-level",
+		"scan.regions":          "regions",
+		"scan.scanners":         "scanners",
+		"scan.output":           "output",
+		"scan.output_format":    "output-format",
+		"scan.bucket":           "bucket",
+		"scan.bucket_region":    "bucket-region",
+		"scan.days_unused":      "days-unused",
 	}
 
 	// Get the flag name from the map, or convert the key if not found
@@ -85,7 +85,7 @@ func LogConfigurationSources(shouldLog bool, cmd *cobra.Command) {
 	}
 
 	logging.Debug("Configuration parameter sources:", nil)
-	
+
 	// List of all configuration parameters to check
 	params := []string{
 		"aws.profile",
