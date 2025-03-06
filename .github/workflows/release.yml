@@ -91,10 +91,10 @@ jobs:
               PR_NUMBER="${BASH_REMATCH[1]}"
               # Replace PR reference with link at the end
               MODIFIED_LINE=$(echo "$REST_OF_LINE" | sed "s|(#${PR_NUMBER})||")
-              echo "• ${MODIFIED_LINE} [<${REPO_URL}/pull/${PR_NUMBER}|#${PR_NUMBER}>]" >> changelog.txt
+              echo "• <${REPO_URL}/commit/${COMMIT_HASH}|${COMMIT_HASH}> ${MODIFIED_LINE} (<${REPO_URL}/pull/${PR_NUMBER}|#${PR_NUMBER}>)" >> changelog.txt
             else
-              # No PR reference, add commit link at the end
-              echo "• ${REST_OF_LINE} [<${REPO_URL}/commit/${COMMIT_HASH}|${COMMIT_HASH}>]" >> changelog.txt
+              # No PR reference, just add commit link at the beginning
+              echo "• <${REPO_URL}/commit/${COMMIT_HASH}|${COMMIT_HASH}> ${REST_OF_LINE}" >> changelog.txt
             fi
             
             # Add empty line after each entry
