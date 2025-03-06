@@ -685,49 +685,52 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 			},
 			{
 				Type:  aws.String("TERM_MATCH"),
-				Field: aws.String("instanceType"),
-				Value: aws.String(instanceClass),
-			},
-			{
-				Type:  aws.String("TERM_MATCH"),
 				Field: aws.String("productFamily"),
 				Value: aws.String("Database Instance"),
 			},
+		}
+
+		if instanceClass != "db.serverless" {
+			instanceFilters = append(instanceFilters, &pricing.Filter{
+				Type:  aws.String("TERM_MATCH"),
+				Field: aws.String("instanceType"),
+				Value: aws.String(instanceClass),
+			})
 		}
 
 		// Log the filters for debugging
 		logging.Debug("RDS instance pricing filters", map[string]interface{}{
 			"filters":        instanceFilters,
 			"instance_class": instanceClass,
-			"region":        region,
-			"location":      location,
-			"engine":        config.Engine,
+			"region":         region,
+			"location":       location,
+			"engine":         config.Engine,
 		})
 
 		// First try to get any RDS instance pricing to see what fields are available
 		input := &pricing.GetProductsInput{
 			ServiceCode: aws.String("AmazonRDS"),
-			Filters:    instanceFilters,
+			Filters:     instanceFilters,
 		}
 
 		result, err := ce.pricingClient.GetProducts(input)
-		if err != nil {
-			logging.Error("Failed to get RDS products", err, map[string]interface{}{
+		if err != nil || len(result.PriceList) == 0 {
+			logging.Warn("Failed to get RDS products", err, map[string]interface{}{
 				"filters": instanceFilters,
 			})
 		} else {
 			logging.Debug("RDS pricing API response", map[string]interface{}{
 				"price_list_count": len(result.PriceList),
-				"first_item":      result.PriceList[0],
+				"first_item":       result.PriceList[0],
 			})
 		}
 
 		instancePrice, err := ce.getPriceFromAPI(instanceFilters)
 		if err != nil {
-			logging.Error("Failed to get RDS instance price", err, map[string]interface{}{
+			logging.Warn("Failed to get RDS instance price", err, map[string]interface{}{
 				"instance_class": instanceClass,
-				"region":        region,
-				"filters":       instanceFilters,
+				"region":         region,
+				"filters":        instanceFilters,
 			})
 			// Fallback to default rate if pricing API fails
 			instancePrice = 0.005
@@ -754,7 +757,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 
 		// Log the filters for debugging
 		logging.Debug("RDS storage pricing filters", map[string]interface{}{
-			"filters":     storageFilters,
+			"filters":    storageFilters,
 			"region":     region,
 			"location":   location,
 			"engine":     config.Engine,
@@ -764,7 +767,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		// First try to get any storage pricing to see what fields are available
 		input = &pricing.GetProductsInput{
 			ServiceCode: aws.String("AmazonRDS"),
-			Filters:    storageFilters,
+			Filters:     storageFilters,
 		}
 
 		result, err = ce.pricingClient.GetProducts(input)
@@ -775,7 +778,7 @@ func (ce *CostEstimator) getAWSPrice(resourceType, region string, config Resourc
 		} else {
 			logging.Debug("RDS storage pricing API response", map[string]interface{}{
 				"price_list_count": len(result.PriceList),
-				"first_item":      result.PriceList[0],
+				"first_item":       result.PriceList[0],
 			})
 		}
 
