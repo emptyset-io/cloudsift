@@ -71,7 +71,7 @@ jobs:
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1)
           echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
           
-          # Generate real changelog with commit links
+          # Generate real changelog with links to commits and PRs
           echo "Generating changelog with links..."
           
           # Create changelog with links to commits and PRs
@@ -79,9 +79,26 @@ jobs:
           
           # Get the changelog entries with commit links and ensure newlines
           rm -f changelog.txt
-          git log --pretty=format:"• <${REPO_URL}/commit/%h|%h> %s (%an)" ${PREVIOUS_TAG}..HEAD | while read -r line; do
-            echo "$line" >> changelog.txt
-            echo "" >> changelog.txt  # Add an empty line after each entry
+          
+          # Process each commit to look for PR references and add appropriate links
+          git log --pretty=format:"%h %s (%an)" ${PREVIOUS_TAG}..HEAD | while read -r line; do
+            COMMIT_HASH=$(echo "$line" | awk '{print $1}')
+            REST_OF_LINE=$(echo "$line" | cut -d' ' -f2-)
+            
+            # Check if commit message contains PR reference (#123)
+            if [[ "$REST_OF_LINE" =~ \(#([0-9]+)\) ]]; then
+              # Extract PR number
+              PR_NUMBER="${BASH_REMATCH[1]}"
+              # Replace PR reference with link at the end
+              MODIFIED_LINE=$(echo "$REST_OF_LINE" | sed "s|(#${PR_NUMBER})||")
+              echo "• ${MODIFIED_LINE} [<${REPO_URL}/pull/${PR_NUMBER}|#${PR_NUMBER}>]" >> changelog.txt
+            else
+              # No PR reference, add commit link at the end
+              echo "• ${REST_OF_LINE} [<${REPO_URL}/commit/${COMMIT_HASH}|${COMMIT_HASH}>]" >> changelog.txt
+            fi
+            
+            # Add empty line after each entry
+            echo "" >> changelog.txt
           done
           
           echo "Changelog content:"
@@ -154,15 +171,6 @@ jobs:
                       "emoji": true
                     },
                     "url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.version }}"
-                  },
-                  {
-                    "type": "button",
-                    "text": {
-                      "type": "plain_text",
-                      "text": "View Workflow",
-                      "emoji": true
-                    },
-                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                   }
                 ]
               }
