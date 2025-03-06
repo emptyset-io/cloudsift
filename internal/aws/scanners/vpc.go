@@ -27,8 +27,8 @@ func (s *VPCScanner) Label() string {
 	return "VPCs"
 }
 
-// getVPCResourceCount counts the number of EC2 instances in a VPC
-func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int, error) {
+// countEC2Instances counts the number of EC2 instances in a VPC
+func (s *VPCScanner) countEC2Instances(ec2Client *ec2.EC2, vpcID string) (int, error) {
 	input := &ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -51,6 +51,46 @@ func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int,
 	}
 
 	return instanceCount, nil
+}
+
+// countENIs counts the number of ENIs in a VPC
+func (s *VPCScanner) countENIs(ec2Client *ec2.EC2, vpcID string) (int, error) {
+	input := &ec2.DescribeNetworkInterfacesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("vpc-id"),
+				Values: []*string{aws.String(vpcID)},
+			},
+		},
+	}
+
+	eniCount := 0
+	err := ec2Client.DescribeNetworkInterfacesPages(input, func(page *ec2.DescribeNetworkInterfacesOutput, lastPage bool) bool {
+		eniCount += len(page.NetworkInterfaces)
+		return !lastPage
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count ENIs in VPC %s: %w", vpcID, err)
+	}
+
+	return eniCount, nil
+}
+
+// getVPCResourceCount counts the number of resources in a VPC
+func (s *VPCScanner) getVPCResourceCount(ec2Client *ec2.EC2, vpcID string) (int, error) {
+	instanceCount, err := s.countEC2Instances(ec2Client, vpcID)
+	if err != nil {
+		return 0, err
+	}
+
+	eniCount, err := s.countENIs(ec2Client, vpcID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Total resources in the VPC
+	return instanceCount + eniCount, nil
 }
 
 // Scan implements Scanner interface
@@ -124,7 +164,7 @@ func (s *VPCScanner) Scan(opts awslib.ScanOptions) (awslib.ScanResults, error) {
 				ResourceType: s.Label(),
 				ResourceName: vpcName,
 				ResourceID:   vpcID,
-				Reason:       "VPC has no resources",
+				Reason:       "VPC has no EC2 Instances or ENIs",
 				Details: map[string]interface{}{
 					"account_id":     opts.AccountID,
 					"region":         opts.Region,
