@@ -24,11 +24,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&AMIScanner{})
 }
 
-// Name implements Scanner interface
-func (s *AMIScanner) Name() string {
-	return "amis"
-}
-
 // ArgumentName implements Scanner interface
 func (s *AMIScanner) ArgumentName() string {
 	return "amis"

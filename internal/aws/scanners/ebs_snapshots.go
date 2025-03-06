@@ -19,11 +19,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&EBSSnapshotScanner{})
 }
 
-// Name implements Scanner interface
-func (s *EBSSnapshotScanner) Name() string {
-	return "ebs-snapshots"
-}
-
 // ArgumentName implements Scanner interface
 func (s *EBSSnapshotScanner) ArgumentName() string {
 	return "ebs-snapshots"

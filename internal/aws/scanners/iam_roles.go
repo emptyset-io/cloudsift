@@ -131,11 +131,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&IAMRoleScanner{})
 }
 
-// Name implements Scanner interface
-func (s *IAMRoleScanner) Name() string {
-	return "iam-roles"
-}
-
 // ArgumentName implements Scanner interface
 func (s *IAMRoleScanner) ArgumentName() string {
 	return "iam-roles"

@@ -38,11 +38,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&IAMUserScanner{})
 }
 
-// Name implements Scanner interface
-func (s *IAMUserScanner) Name() string {
-	return "iam-users"
-}
-
 // ArgumentName implements Scanner interface
 func (s *IAMUserScanner) ArgumentName() string {
 	return "iam-users"

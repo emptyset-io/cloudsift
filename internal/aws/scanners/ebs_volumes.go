@@ -21,11 +21,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&EBSVolumeScanner{})
 }
 
-// Name implements Scanner interface
-func (s *EBSVolumeScanner) Name() string {
-	return "ebs-volumes"
-}
-
 // ArgumentName implements Scanner interface
 func (s *EBSVolumeScanner) ArgumentName() string {
 	return "ebs-volumes"

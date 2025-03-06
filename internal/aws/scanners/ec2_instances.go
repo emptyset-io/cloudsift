@@ -26,11 +26,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&EC2InstanceScanner{})
 }
 
-// Name implements Scanner interface
-func (s *EC2InstanceScanner) Name() string {
-	return "ec2-instances"
-}
-
 // ArgumentName implements Scanner interface
 func (s *EC2InstanceScanner) ArgumentName() string {
 	return "ec2-instances"

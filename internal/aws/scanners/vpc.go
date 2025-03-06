@@ -17,11 +17,6 @@ func init() {
 	awslib.DefaultRegistry.RegisterScanner(&VPCScanner{})
 }
 
-// Name implements Scanner interface
-func (s *VPCScanner) Name() string {
-	return "vpcs"
-}
-
 // ArgumentName implements Scanner interface
 func (s *VPCScanner) ArgumentName() string {
 	return "vpcs"
